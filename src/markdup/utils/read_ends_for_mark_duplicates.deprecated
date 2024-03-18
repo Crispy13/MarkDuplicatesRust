@@ -1,0 +1,24 @@
+pub(crate) struct ReadEndsForMarkDuplicates {
+    pub(crate) library_id: i16,
+    pub(crate) read1_reference_index: i32,
+    pub(crate) read1_coordinate: i32,
+    pub(crate) orientation: u8,
+    pub(crate) read2_reference_index: i32,
+    pub(crate) read2_coordinate: i32,
+
+    
+}
+
+pub(crate) struct ReadEndsForMarkDuplicatesWithBarcodes {
+    read_ends_fmd: ReadEndsForMarkDuplicates,
+    barcode: i32,          // primary barcode for this read (and pair)
+    read_one_barcode: i32, // read one barcode, 0 if not present
+    read_two_barcode: i32, // read two barcode, 0 if not present or not paired
+}
+
+
+// impl From<ReadEndsForMarkDuplicates> for ReadEndsForMarkDuplicatesWithBarcodes {
+//     fn from(value: ReadEndsForMarkDuplicates) -> Self {
+        
+//     }
+// }
