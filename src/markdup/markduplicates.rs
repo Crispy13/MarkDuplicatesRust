@@ -1,10 +1,13 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, mem::size_of, };
 
 use rust_htslib::bam::{HeaderView, IndexedReader, Read, Record};
 
-use crate::{cmdline::cli::Cli, hts::SAMTag};
+use crate::{cmdline::cli::Cli, hts::{SAMTag, SortOrder}};
 
-use super::utils::{physical_location::PhysicalLocation, read_ends_for_mark_duplicates::ReadEndsForMarkDuplicates};
+use super::utils::{
+    physical_location::PhysicalLocation, read_ends_for_mark_duplicates::ReadEndsForMarkDuplicates,
+    read_ends_for_mark_duplicates_with_barcodes::ReadEndsForMarkDuplicatesWithBarcodes,
+};
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
 pub(crate) struct MarkDuplicates {
@@ -19,12 +22,20 @@ impl MarkDuplicates {
     fn build_sorted_read_end_vecs(&mut self, use_barcodes: bool) -> Result<(), Error> {
         let indexed_reader = &mut self.indexed_reader;
 
+        let size_in_bytes = size_of::<ReadEndsForMarkDuplicates>();
+
+        // TODO: MAX_RECORDS_IN_RAM~
+
         let duplicate_query_name = String::new();
         let duplicate_index = Self::NO_SUCH_INDEX;
+
+        let assumed_sort_order = SortOrder::from_header(indexed_reader.header())?;
 
         indexed_reader.fetch(".")?;
 
         let mut record = Record::new();
+
+        
         while let Some(read_res) = indexed_reader.read(&mut record) {
             // Just unwrap `Result` to check the reading process successful.
             // If Err, it means that bam file may be corrupted. Don't need to recover this error.
@@ -54,6 +65,8 @@ impl MarkDuplicates {
                     }
                 }
             }
+
+
         }
 
         todo!()
@@ -66,12 +79,32 @@ trait MarkDuplicatesExt {
         rhs: &ReadEndsForMarkDuplicates,
         compare_read2: bool,
         use_barcodes: bool,
-    ) {
-        let are_comparable = lhs.read_ends.library_id == rhs.read_ends.library_id;
+    ) -> bool {
+        let mut are_comparable = lhs.read_ends.library_id == rhs.read_ends.library_id;
 
-        if use_barcodes && are_comparable { // areComparable is useful here to avoid the casts below
+        // areComparable is useful here to avoid the casts below
+        if use_barcodes && are_comparable {
+            let lhs_with_barcodes = lhs.barcode_data.as_ref().unwrap();
+            let rhs_with_barcodes = rhs.barcode_data.as_ref().unwrap();
 
+            are_comparable = lhs_with_barcodes.barcode == rhs_with_barcodes.barcode
+                && lhs_with_barcodes.read_one_barcode == rhs_with_barcodes.read_one_barcode
+                && lhs_with_barcodes.read_two_barcode == rhs_with_barcodes.read_two_barcode;
         }
+
+        if are_comparable {
+            are_comparable = lhs.read_ends.read1_reference_index
+                == rhs.read_ends.read1_reference_index
+                && lhs.read_ends.read1_coordinate == rhs.read_ends.read1_coordinate
+                && lhs.read_ends.orientation == rhs.read_ends.orientation;
+        }
+
+        if are_comparable && compare_read2 {
+            are_comparable = lhs.read_ends.read2_reference_index
+                == rhs.read_ends.read2_reference_index
+                && lhs.read_ends.read2_coordinate == rhs.read_ends.read2_coordinate
+        }
+
+        are_comparable
     }
 }
-
