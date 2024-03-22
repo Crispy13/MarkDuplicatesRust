@@ -6,7 +6,7 @@ use super::{
     read_ends_for_mark_duplicates::ReadEndsForMarkDuplicates,
 };
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub(crate) struct ReadEndsForMarkDuplicatesWithBarcodes {
     pub(crate) barcode: i32,          // primary barcode for this read (and pair)
     pub(crate) read_one_barcode: i32, // read one barcode, 0 if not present
