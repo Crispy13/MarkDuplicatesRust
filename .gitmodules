@@ -1,0 +1,3 @@
+[submodule "deps/rust-htslib"]
+	path = deps/rust-htslib
+	url = https://github.com/Crispy13/rust-htslib.git
