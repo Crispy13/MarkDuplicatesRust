@@ -1,4 +1,6 @@
 pub(crate) mod coordinate_sorted_pair_info_map;
+pub(crate) mod duplicate_scoring_strategy;
+pub(crate) mod utils;
 
 use rust_htslib::bam::HeaderView;
 
@@ -47,9 +49,10 @@ impl SortOrder {
     }
 }
 
+
 #[cfg(test)]
 mod test {
-    use rust_htslib::bam::{IndexedReader, Read};
+    use rust_htslib::bam::{IndexedReader, Read, Record};
 
     use super::SortOrder;
 
@@ -64,5 +67,43 @@ mod test {
             "{:?}",
             SortOrder::from_str(reader.header().header_map().get_sort_order().unwrap()).unwrap()
         );
+    }
+
+    #[test]
+    fn set_value() {
+        let mut reader = IndexedReader::from_path(
+            "/home/eck/workspace/markdup_rust/tests/data/NA12878.chrom11.ILLUMINA.bwa.CEU.low_coverage.20121211.bam"
+        ).unwrap();
+
+        let mut record = Record::new();
+
+        reader.fetch("11").unwrap();
+
+        while let Some(r) = reader.read(&mut record) {
+            r.unwrap();
+
+            println!("{}", std::str::from_utf8(record.qname()).unwrap());
+            println!("{}", record.mapq());
+
+            record.set_mapq(59);
+
+            println!("{}", record.mapq());
+
+            break;
+        }
+
+        reader.fetch("11").unwrap();
+
+        while let Some(r) = reader.read(&mut record) {
+            r.unwrap();
+
+            println!("{}", std::str::from_utf8(record.qname()).unwrap());
+            println!("{}", record.mapq());
+
+            break;
+        }
+        
+
+
     }
 }

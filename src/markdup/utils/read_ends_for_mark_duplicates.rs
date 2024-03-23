@@ -1,6 +1,6 @@
 use core::fmt;
 
-use rust_htslib::bam::{self, ext::BamRecordExtensions, Record};
+use rust_htslib::bam::{self, ext::BamRecordExtensions, HeaderView, Record};
 use serde::{Deserialize, Serialize};
 
 use super::{physical_location::{impl_physical_location_core, PhysicalLocation, PhysicalLocationShort}, read_ends::{impl_physical_location_read_ends, impl_read_ends_ext, ReadEnds, ReadEndsExt}, read_ends_for_mark_duplicates_with_barcodes::ReadEndsForMarkDuplicatesWithBarcodes};
@@ -43,9 +43,9 @@ impl ReadEndsForMarkDuplicates {
         + 8 // last 8 == reference overhead
         + 13; // This is determined experimentally with JProfiler
         
-    pub(crate) fn new() -> Self {
-        Self::default()
-    }
+    // pub(crate) fn new() -> Self {
+    //     Self::default()
+    // }
 
     pub(crate) fn with_read(read: Self) -> Self {
         let physical_loc_short = PhysicalLocationShort {
@@ -100,3 +100,4 @@ impl Default for ReadEndsForMarkDuplicates {
         }
     }
 }
+

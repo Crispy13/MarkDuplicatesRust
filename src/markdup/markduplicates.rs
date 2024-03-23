@@ -1,8 +1,17 @@
-use std::{collections::HashSet, mem::size_of, };
+use std::{collections::HashSet, mem::size_of};
 
-use rust_htslib::bam::{HeaderView, IndexedReader, Read, Record};
+use rust_htslib::bam::{ext::BamRecordExtensions, HeaderView, IndexedReader, Read, Record};
 
-use crate::{cmdline::cli::Cli, hts::{SAMTag, SortOrder}};
+use crate::{
+    cmdline::cli::Cli,
+    hts::{duplicate_scoring_strategy::DuplicateScoringStrategy, SAMTag, SortOrder},
+    markdup::utils::{
+        library_id_generator::LibraryIdGenerator, read_ends::ReadEnds, read_ends_md_map::{
+            DiskBasedReadEndsForMarkDuplicatesMap, MemoryBasedReadEndsForMarkDuplicatesMap,
+            ReadEndsForMarkDuplicatesMap,
+        }
+    },
+};
 
 use super::utils::{
     physical_location::PhysicalLocation, read_ends_for_mark_duplicates::ReadEndsForMarkDuplicates,
@@ -13,10 +22,9 @@ type Error = Box<dyn std::error::Error + Send + Sync>;
 pub(crate) struct MarkDuplicates {
     indexed_reader: IndexedReader,
     pg_ids_seen: HashSet<String>,
+    library_id_generator: LibraryIdGenerator,
     cli: Cli,
 }
-
-
 
 impl MarkDuplicates {
     const NO_SUCH_INDEX: i64 = i64::MAX;
@@ -28,8 +36,8 @@ impl MarkDuplicates {
 
         // TODO: MAX_RECORDS_IN_RAM~
 
-        let duplicate_query_name = String::new();
-        let duplicate_index = Self::NO_SUCH_INDEX;
+        let mut duplicate_query_name = String::new();
+        let mut duplicate_index = Self::NO_SUCH_INDEX;
 
         let assumed_sort_order = SortOrder::from_header(indexed_reader.header())?;
 
@@ -37,7 +45,19 @@ impl MarkDuplicates {
 
         let mut record = Record::new();
 
-        
+        let tmp = match assumed_sort_order {
+            SortOrder::QueryName => ReadEndsForMarkDuplicatesMap::MemoryBased(
+                MemoryBasedReadEndsForMarkDuplicatesMap::new(),
+            ),
+            _ => {
+                ReadEndsForMarkDuplicatesMap::DiskBased(DiskBasedReadEndsForMarkDuplicatesMap::new(
+                    self.cli.MAX_FILE_HANDLES_FOR_READ_ENDS_MAP,
+                )?)
+            }
+        };
+
+        let mut index = 0;
+
         while let Some(read_res) = indexed_reader.read(&mut record) {
             // Just unwrap `Result` to check the reading process successful.
             // If Err, it means that bam file may be corrupted. Don't need to recover this error.
@@ -68,8 +88,80 @@ impl MarkDuplicates {
                 }
             }
 
+            // If working in query-sorted, need to keep index of first record with any given query-name.
+            if matches!(assumed_sort_order, SortOrder::QueryName)
+                && !record.qname().eq(duplicate_query_name.as_bytes())
+            {
+                duplicate_query_name.clear();
+                duplicate_query_name.push_str(std::str::from_utf8(record.qname())?);
 
+                duplicate_index = index;
+            }
+
+            if record.is_unmapped() {
+                if record.tid() == -1 && matches!(assumed_sort_order, SortOrder::Coordinate) {
+                    // When we hit the unmapped reads with no coordinate, no reason to continue (only in coordinate sort).
+                    break;
+                }
+
+                // If this read is unmapped but sorted with the mapped reads, just skip it.
+            } else if !(record.is_secondary() || record.is_supplementary()) {
+                let index_for_read = match assumed_sort_order {
+                    SortOrder::QueryName => duplicate_index,
+                    _ => index,
+                };
+                // let fragment_end =
+            }
         }
+
+        todo!()
+    }
+
+    /**
+     * Builds a read ends object that represents a single read.
+     */
+    fn build_read_ends(
+        &self,
+        header: &HeaderView,
+        index: i64,
+        rec: &Record,
+        use_barcode: bool,
+    ) -> ReadEndsForMarkDuplicates {
+        let mut read_ends = ReadEnds::default();
+
+        read_ends.read1_reference_index = rec.tid();
+        read_ends.read1_coordinate = if rec.is_reverse() {
+            rec.reference_end() as i32
+        } else {
+            rec.reference_start() as i32
+        };
+
+        read_ends.orientation = if rec.is_reverse() {
+            ReadEnds::R
+        } else {
+            ReadEnds::F
+        };
+
+        let read1_index_in_file = index;
+        let score = DuplicateScoringStrategy::compute_duplicate_score(
+            rec,
+            self.cli.DUPLICATE_SCORING_STRATEGY,
+            false,
+        ).unwrap(); // we can assure that no error occurs when `assume_mate_cigar=false`.
+
+        
+
+
+        // Doing this lets the ends object know that it's part of a pair
+        if rec.is_paired() && !rec.is_mate_unmapped() {
+            read_ends.read2_reference_index = rec.mtid()
+        }
+
+        // Fill in the library ID
+        read_ends.library_id = self.library
+
+        
+        
 
         todo!()
     }

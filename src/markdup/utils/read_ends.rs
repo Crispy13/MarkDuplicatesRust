@@ -49,12 +49,12 @@ impl Default for ReadEnds {
 }
 
 impl ReadEnds {
-    pub(super) const F: u8 = 0;
-    pub(super) const R: u8 = 1;
-    pub(super) const FF: u8 = 2;
-    pub(super) const FR: u8 = 3;
-    pub(super) const RR: u8 = 4;
-    pub(super) const RF: u8 = 5;
+    pub(crate) const F: u8 = 0;
+    pub(crate) const R: u8 = 1;
+    pub(crate) const FF: u8 = 2;
+    pub(crate) const FR: u8 = 3;
+    pub(crate) const RR: u8 = 4;
+    pub(crate) const RF: u8 = 5;
 }
 
 impl PhysicalLocation for ReadEnds {

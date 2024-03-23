@@ -8,5 +8,5 @@ edition = "2021"
 [dependencies]
 bincode = "1.3.3"
 clap = { version = "4.5.3", features = ["derive"] }
-rust-htslib = { path = "/home/eck/workspace/markdup_rust/deps/rust-htslib" }
+rust-htslib = { path = "./deps/rust-htslib" }
 serde = { version = "1.0.197", features = ["derive"] }
