@@ -79,7 +79,26 @@ impl UmiUtil {
      * @return Top or bottom strand, unknown if it cannot be determined.
      */
     fn get_strand(rec: &Record) -> ReadStrand {
+        if rec.is_unmapped() || rec.is_mate_unmapped() {
+            return ReadStrand::UNKNOWN
+        }
 
+        // If the read pair are aligned to different contigs we use
+        // the reference index to determine relative 5' coordinate ordering.
+        // Both the read and its mate should not have their unmapped flag set to true.
+        if rec.tid() != rec.mtid() {
+            if rec.is_first_in_template() == (rec.tid() < rec.mtid()) {
+                return ReadStrand::TOP;
+            } else {
+                return ReadStrand::BOTTOM;
+            }
+        }
+
+        let read_5prime_start = if rec.is_reverse() {
+            rec.get_unclipped_end()
+        } else {
+            rec.get_unclipped_start()
+        };
         
         todo!()
     }
