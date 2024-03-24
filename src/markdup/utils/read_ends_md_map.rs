@@ -7,7 +7,8 @@ use crate::hts::coordinate_sorted_pair_info_map::{
 use super::read_ends_for_mark_duplicates::ReadEndsForMarkDuplicates;
 
 // common error type
-type Error = Box<dyn std::error::Error + Send + Sync>;
+// type Error = Box<dyn std::error::Error + Send + Sync>;
+use anyhow::{anyhow, Error};
 
 pub(crate) struct DiskBasedReadEndsForMarkDuplicatesMap {
     pair_info_map: CoordinateSortedPairInfoMap<String, ReadEndsForMarkDuplicates>,
@@ -99,7 +100,7 @@ impl ReadEndsForMarkDuplicatesMap {
         match self {
             ReadEndsForMarkDuplicatesMap::MemoryBased(m) => m
                 .remove(mate_sequence_index as usize, key)
-                .ok_or_else(|| Error::from("None")),
+                .ok_or_else(|| anyhow!("None")),
             ReadEndsForMarkDuplicatesMap::DiskBased(m) => m.remove(mate_sequence_index, key),
         }
     }

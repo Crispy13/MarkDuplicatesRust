@@ -4,7 +4,8 @@ pub(crate) mod utils;
 
 use rust_htslib::bam::HeaderView;
 
-type Error = Box<dyn std::error::Error + Send + Sync>;
+// type Error = Box<dyn std::error::Error + Send + Sync>;
+use anyhow::{anyhow, Error};
 
 pub(crate) enum SAMTag {
     PG,
@@ -33,7 +34,7 @@ impl SortOrder {
             "unsorted" => Self::Unsorted,
             "queryname" => Self::QueryName,
             "coordinate" => Self::Coordinate,
-            _ => Err(format!("Invalid value: {}", s))?,
+            _ => Err(anyhow!("Invalid value: {}", s))?,
         };
 
         Ok(v)
@@ -42,7 +43,7 @@ impl SortOrder {
     pub(crate) fn from_header(h: &HeaderView) -> Result<Self, Error> {
         let v =match h.header_map().get_sort_order() {
             Some(s) => SortOrder::from_str(s)?,
-            None => Err("Failed to get 'SO' value in sam file header.")?,
+            None => Err(anyhow!("Failed to get 'SO' value in sam file header."))?,
         };
 
         Ok(v)

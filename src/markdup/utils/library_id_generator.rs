@@ -1,30 +1,33 @@
 use std::collections::HashMap;
 
-use rust_htslib::bam::{record::ReadGroupRecord, HeaderView, Record};
+use rust_htslib::bam::{record::RecordExt, HeaderView, Record};
 
-type Error = Box<dyn std::error::Error + Send + Sync>;
-pub(crate) struct LibraryIdGenerator<'s> {
-    library_ids:HashMap<&'s str, i16>, // from library string to library id
+// type Error = Box<dyn std::error::Error + Send + Sync>;
+use anyhow::Error;
+pub(crate) struct LibraryIdGenerator {
+    library_ids: HashMap<String, i16>, // from library string to library id
     next_library_id: i16,
 }
 
-impl<'s> LibraryIdGenerator<'s> {
+impl LibraryIdGenerator {
     const UNKNOWN_LIBRARY: &'static str = "Unknown Library";
 
     /** Get the library ID for the given SAM record. */
     pub(crate) fn get_library_id(&mut self, rec: &Record) -> Result<i16, Error> {
         let library = Self::get_library_name(rec)?;
 
-        let library_id = match self.library_ids.entry(library) {
-            std::collections::hash_map::Entry::Occupied(e) => e.get(),
-            std::collections::hash_map::Entry::Vacant(e) => {
-                let v = e.insert(self.next_library_id);
+        let library_id = match self.library_ids.get(library) {
+            Some(v) => v,
+            None => {
+                self.library_ids
+                    .insert(library.to_string(), self.next_library_id);
                 self.next_library_id += 1;
-                v
-            },
-        }.clone();
+                self.library_ids.get(library).unwrap()
+            }
+        }
+        .clone();
 
-        Ok(library_id)   
+        Ok(library_id)
     }
 
     /**
@@ -55,7 +58,7 @@ mod examples {
     impl<'s> B<'s> {
         fn from_a(a: &'s A) -> Self {
             Self {
-                str_slice: &a.string
+                str_slice: &a.string,
             }
         }
 

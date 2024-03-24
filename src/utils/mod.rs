@@ -1,3 +1,5 @@
+pub(crate) mod logging;
+
 use std::{
     fmt::{Debug, Display},
     path::PathBuf,

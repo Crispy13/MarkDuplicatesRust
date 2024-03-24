@@ -1,28 +1,35 @@
 use std::{collections::HashSet, mem::size_of};
 
-use rust_htslib::bam::{ext::BamRecordExtensions, HeaderView, IndexedReader, Read, Record};
+use rust_htslib::bam::{ext::BamRecordExtensions, record::{Aux, ReadGroupRecord, SAMReadGroupRecord}, HeaderView, IndexedReader, Read, Record};
 
 use crate::{
     cmdline::cli::Cli,
     hts::{duplicate_scoring_strategy::DuplicateScoringStrategy, SAMTag, SortOrder},
     markdup::utils::{
-        library_id_generator::LibraryIdGenerator, read_ends::ReadEnds, read_ends_md_map::{
+        library_id_generator::LibraryIdGenerator,
+        read_ends::ReadEnds,
+        read_ends_md_map::{
             DiskBasedReadEndsForMarkDuplicatesMap, MemoryBasedReadEndsForMarkDuplicatesMap,
             ReadEndsForMarkDuplicatesMap,
-        }
+        },
+        read_name_parser::ReadNameParserExt,
     },
 };
 
 use super::utils::{
-    physical_location::PhysicalLocation, read_ends_for_mark_duplicates::ReadEndsForMarkDuplicates,
+    optical_duplicate_finder::OpticalDuplicateFinder, physical_location::PhysicalLocation,
+    read_ends_for_mark_duplicates::ReadEndsForMarkDuplicates,
     read_ends_for_mark_duplicates_with_barcodes::ReadEndsForMarkDuplicatesWithBarcodes,
 };
 
-type Error = Box<dyn std::error::Error + Send + Sync>;
+// type Error = Box<dyn std::error::Error + Send + Sync>;
+use anyhow::{Error, anyhow};
+
 pub(crate) struct MarkDuplicates {
     indexed_reader: IndexedReader,
     pg_ids_seen: HashSet<String>,
     library_id_generator: LibraryIdGenerator,
+    optical_duplicate_finder: OpticalDuplicateFinder,
     cli: Cli,
 }
 
@@ -121,12 +128,12 @@ impl MarkDuplicates {
      * Builds a read ends object that represents a single read.
      */
     fn build_read_ends(
-        &self,
+        &mut self,
         header: &HeaderView,
         index: i64,
         rec: &Record,
         use_barcode: bool,
-    ) -> ReadEndsForMarkDuplicates {
+    ) -> Result<ReadEndsForMarkDuplicates, Error> {
         let mut read_ends = ReadEnds::default();
 
         read_ends.read1_reference_index = rec.tid();
@@ -147,10 +154,8 @@ impl MarkDuplicates {
             rec,
             self.cli.DUPLICATE_SCORING_STRATEGY,
             false,
-        ).unwrap(); // we can assure that no error occurs when `assume_mate_cigar=false`.
-
-        
-
+        )
+        .unwrap(); // we can assure that no error occurs when `assume_mate_cigar=false`.
 
         // Doing this lets the ends object know that it's part of a pair
         if rec.is_paired() && !rec.is_mate_unmapped() {
@@ -158,10 +163,36 @@ impl MarkDuplicates {
         }
 
         // Fill in the library ID
-        read_ends.library_id = self.library
+        read_ends.library_id = self.library_id_generator.get_library_id(rec)?;
 
-        
-        
+        // Fill in the location information for optical duplicates
+        if self
+            .optical_duplicate_finder
+            .add_location_information(std::str::from_utf8(rec.qname())?.to_string(), &mut read_ends)
+        {
+            // calculate the RG number (nth in list)
+            read_ends.read_group = 0;
+
+            let rg = rec.aux(b"RG").or_else(|err| Err(Error::from(err))).and_then(|aux| match aux {
+                Aux::String(v) => Ok(v),
+                _ => Err(anyhow!("Invalid type for RG tag")),
+            },);
+            let read_groups = header.get_read_groups();
+            
+            if let (Ok(rg), Ok(read_groups)) = (rg, read_groups) {
+                for read_group in read_groups {
+                    if read_group.get_read_group_id().eq(rg) {
+                        break;
+                    } else {
+                        read_ends.read_group += 1;
+                    }
+                }
+            }
+        }
+
+        if use_barcode {
+            
+        }   
 
         todo!()
     }

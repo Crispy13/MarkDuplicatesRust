@@ -14,7 +14,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::utils::PathExt;
 
-type Error = Box<dyn std::error::Error + Send + Sync>;
+// type Error = Box<dyn std::error::Error + Send + Sync>;
+use anyhow::{anyhow, Error};
 
 struct FileAppendStreamLRUCache {
     cache_size: i32,
@@ -108,7 +109,7 @@ where
         Q: Hash + Eq,
     {
         if self.iteration_in_progress {
-            Err("Cannot be called when iteration is in progress")?
+            Err(anyhow!("Cannot be called when iteration is in progress"))?
         } else {
             self.ensure_sequence_loaded(sequence_index)?;
             Ok(self.map_in_ram.as_mut().unwrap().remove(key).unwrap())
@@ -155,7 +156,7 @@ where
             let num_records = self.size_of_map_on_disk.remove(&sequence_index);
             if map_on_disk.exists() {
                 if num_records.is_none() {
-                    Err(format!("No num records for {}", map_on_disk.try_to_str()?))?
+                    Err(anyhow!("No num records for {}", map_on_disk.try_to_str()?))?
                 }
 
                 let mut input_stream;
@@ -167,7 +168,7 @@ where
                         load_byte_file_as_obj::<Self::DataCodec>(&mut input_stream)?;
                     let map_in_ram = self.map_in_ram.as_mut().unwrap();
                     if map_in_ram.contains_key(&key) {
-                        Err(format!(
+                        Err(anyhow!(
                             "Value was put into PairInfoMap more than once.  {}: {}",
                             sequence_index, key
                         ))?
@@ -180,7 +181,7 @@ where
 
                 remove_file(&map_on_disk)?;
             } else if let Some(true) = num_records.and_then(|nr| Some(nr > 0)) {
-                Err(format!(
+                Err(anyhow!(
                     "Non-zero numRecords but {} does not exist",
                     map_on_disk.try_to_str()?
                 ))?
@@ -195,7 +196,7 @@ where
             "{}/{}.tmp",
             self.work_dir
                 .to_str()
-                .ok_or_else(|| "Cannot convert `work_dir` into str.")?,
+                .ok_or_else(|| anyhow!("Cannot convert `work_dir` into str."))?,
             index
         );
 
@@ -206,13 +207,13 @@ where
 
     fn put(&mut self, sequence_index: i32, key: K, record: R) -> Result<(), Error> {
         if self.iteration_in_progress {
-            Err("Cannot be called when iteration is in progress")?
+            Err(anyhow!("Cannot be called when iteration is in progress"))?
         } else {
             if sequence_index == self.sequence_index_of_map_in_ram {
                 // just unwrap(). we can assure it is not None when this method is called.
                 let map_in_ram = self.map_in_ram.as_mut().unwrap();
                 if map_in_ram.contains_key(&key) {
-                    Err(format!(
+                    Err(anyhow!(
                         "Putting value into PairInfoMap that already existed. {}: {}",
                         sequence_index, key
                     ))?
