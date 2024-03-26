@@ -1,29 +1,36 @@
 use std::{collections::HashSet, mem::size_of};
 
-use rust_htslib::bam::{ext::BamRecordExtensions, record::{Aux, ReadGroupRecord, SAMReadGroupRecord}, HeaderView, IndexedReader, Read, Record};
+use rust_htslib::bam::{
+    ext::BamRecordExtensions,
+    record::{Aux, SAMReadGroupRecord},
+    HeaderView, IndexedReader, Read, Record,
+};
 
 use crate::{
     cmdline::cli::Cli,
     hts::{duplicate_scoring_strategy::DuplicateScoringStrategy, SAMTag, SortOrder},
-    markdup::utils::{
-        library_id_generator::LibraryIdGenerator,
-        read_ends::ReadEnds,
-        read_ends_md_map::{
-            DiskBasedReadEndsForMarkDuplicatesMap, MemoryBasedReadEndsForMarkDuplicatesMap,
-            ReadEndsForMarkDuplicatesMap,
+    markdup::{
+        umi_utils::UmiUtil,
+        utils::{
+            library_id_generator::LibraryIdGenerator,
+            read_ends::ReadEnds,
+            read_ends_md_map::{
+                DiskBasedReadEndsForMarkDuplicatesMap, MemoryBasedReadEndsForMarkDuplicatesMap,
+                ReadEndsForMarkDuplicatesMap,
+            },
+            read_name_parser::ReadNameParserExt,
         },
-        read_name_parser::ReadNameParserExt,
-    },
+    }, utils::{hash_code, CommonHasher},
 };
 
 use super::utils::{
     optical_duplicate_finder::OpticalDuplicateFinder, physical_location::PhysicalLocation,
     read_ends_for_mark_duplicates::ReadEndsForMarkDuplicates,
-    read_ends_for_mark_duplicates_with_barcodes::ReadEndsForMarkDuplicatesWithBarcodes,
+    read_ends_for_mark_duplicates_with_barcodes::ReadEndsBarcodeData,
 };
 
 // type Error = Box<dyn std::error::Error + Send + Sync>;
-use anyhow::{Error, anyhow};
+use anyhow::{anyhow, Error};
 
 pub(crate) struct MarkDuplicates {
     indexed_reader: IndexedReader,
@@ -166,19 +173,22 @@ impl MarkDuplicates {
         read_ends.library_id = self.library_id_generator.get_library_id(rec)?;
 
         // Fill in the location information for optical duplicates
-        if self
-            .optical_duplicate_finder
-            .add_location_information(std::str::from_utf8(rec.qname())?.to_string(), &mut read_ends)
-        {
+        if self.optical_duplicate_finder.add_location_information(
+            std::str::from_utf8(rec.qname())?.to_string(),
+            &mut read_ends,
+        ) {
             // calculate the RG number (nth in list)
             read_ends.read_group = 0;
 
-            let rg = rec.aux(b"RG").or_else(|err| Err(Error::from(err))).and_then(|aux| match aux {
-                Aux::String(v) => Ok(v),
-                _ => Err(anyhow!("Invalid type for RG tag")),
-            },);
+            let rg = rec
+                .aux(b"RG")
+                .or_else(|err| Err(Error::from(err)))
+                .and_then(|aux| match aux {
+                    Aux::String(v) => Ok(v),
+                    _ => Err(anyhow!("Invalid type for RG tag")),
+                });
             let read_groups = header.get_read_groups();
-            
+
             if let (Ok(rg), Ok(read_groups)) = (rg, read_groups) {
                 for read_group in read_groups {
                     if read_group.get_read_group_id().eq(rg) {
@@ -190,10 +200,44 @@ impl MarkDuplicates {
             }
         }
 
-        if use_barcode {
-            
-        }   
+        let mut read_ends_for_md = ReadEndsForMarkDuplicates {
+            score,
+            read1_index_in_file,
+            read_ends,
+            ..Default::default()
+        };
 
+        if use_barcode {
+            let top_strand_normalized_umi = UmiUtil::get_top_strand_normalized_umi(
+                rec,
+                &self.cli.BARCODE_TAG,
+                self.cli.DUPLEX_UMI,
+            )?;
+
+            let barcode = hash_code(top_strand_normalized_umi);
+
+            let mut barcode_data = ReadEndsBarcodeData {
+                barcode,
+                ..Default::default()
+            };
+
+            if (!rec.is_paired() || rec.is_first_in_template()) {
+                barcode_data.read_one_barcode = self.get_read_one_barcode_value(rec);
+            } else {
+                barcode_data.read_two_barcode = self.get_read_two_barcode_value(rec);
+            }
+
+            read_ends_for_md.barcode_data = Some(barcode_data);
+        }
+
+        todo!()
+    }
+
+    fn get_read_one_barcode_value(&self, rec: &Record) -> i32 {
+        todo!()
+    }
+
+    fn get_read_two_barcode_value(&self, rec: &Record) -> i32 {
         todo!()
     }
 }

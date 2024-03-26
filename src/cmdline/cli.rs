@@ -33,5 +33,26 @@ pub(crate) struct Cli {
         default_value_t = ScoringStrategy::TOTAL_MAPPED_REFERENCE_LENGTH,
     )]
     pub(crate) DUPLICATE_SCORING_STRATEGY: ScoringStrategy,
+    
+    /// Barcode SAM tag (ex. BC for 10X Genomics)
+    #[arg(
+        long = "BARCODE_TAG",
+        value_name = "String",
+        default_value_t = String::new(),
+    )]
+    pub(crate) BARCODE_TAG: String,
 
+    /// Treat UMIs as being duplex stranded.  This option requires that the UMI consist of two equal length 
+    /// strings that are separated by a hyphen (e.g. 'ATC-GTC'). Reads are considered duplicates if, in addition to standard 
+    /// definition, have identical normalized UMIs.  A UMI from the 'bottom' strand is normalized by swapping its content 
+    /// around the hyphen (eg. ATC-GTC becomes GTC-ATC).  A UMI from the 'top' strand is already normalized as it is. 
+    /// Both reads from a read pair considered top strand if the read 1 unclipped 5' coordinate is less than the read 
+    /// 2 unclipped 5' coordinate. All chimeric reads and read fragments are treated as having come from the top strand. 
+    /// With this option is it required that the BARCODE_TAG hold non-normalized UMIs. Default false.
+    #[arg(
+        long = "DUPLEX_UMI",
+        value_name = "bool",
+        default_value_t = false,
+    )]
+    pub(crate) DUPLEX_UMI: bool,
 }

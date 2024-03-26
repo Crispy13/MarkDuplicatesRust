@@ -59,7 +59,7 @@ impl UmiUtil {
             ))?
         }
 
-        match Self::get_strand(rec) {
+        match Self::get_strand(rec)? {
             ReadStrand::BOTTOM => {
                 Ok(format!("{}{}{}", split.get(1).unwrap(), Self::DUPLEX_UMI_DELIMITER, split.get(0).unwrap()))
             }
@@ -78,9 +78,9 @@ impl UmiUtil {
      * @param rec Record to determine top or bottom strand
      * @return Top or bottom strand, unknown if it cannot be determined.
      */
-    fn get_strand(rec: &Record) -> ReadStrand {
+    fn get_strand(rec: &Record) -> Result<ReadStrand, Error> {
         if rec.is_unmapped() || rec.is_mate_unmapped() {
-            return ReadStrand::UNKNOWN
+            return Ok(ReadStrand::UNKNOWN)
         }
 
         // If the read pair are aligned to different contigs we use
@@ -88,9 +88,9 @@ impl UmiUtil {
         // Both the read and its mate should not have their unmapped flag set to true.
         if rec.tid() != rec.mtid() {
             if rec.is_first_in_template() == (rec.tid() < rec.mtid()) {
-                return ReadStrand::TOP;
+                return Ok(ReadStrand::TOP);
             } else {
-                return ReadStrand::BOTTOM;
+                return Ok(ReadStrand::BOTTOM);
             }
         }
 
@@ -99,8 +99,18 @@ impl UmiUtil {
         } else {
             rec.get_unclipped_start()
         };
-        
-        todo!()
+
+        let mate_5prime_start = if rec.is_mate_reverse() {
+            rec.get_mate_unclipped_end()
+        } else {
+            rec.get_mate_unclipped_start()
+        }?;
+
+        if rec.is_first_in_template() == (read_5prime_start <= mate_5prime_start) {
+            Ok(ReadStrand::TOP)
+        } else {
+            Ok(ReadStrand::BOTTOM)
+        }
     }
 }
 

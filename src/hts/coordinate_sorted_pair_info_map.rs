@@ -273,12 +273,12 @@ fn load_byte_file_as_obj<T: for<'de> Deserialize<'de>>(file: &mut File) -> Resul
 mod test {
     use std::mem::size_of;
 
-    use crate::markdup::utils::read_ends_for_mark_duplicates_with_barcodes::ReadEndsForMarkDuplicatesWithBarcodes;
+    use crate::markdup::utils::read_ends_for_mark_duplicates_with_barcodes::ReadEndsBarcodeData;
 
     use super::*;
     #[test]
     fn save_and_load() {
-        let a = ReadEndsForMarkDuplicatesWithBarcodes {
+        let a = ReadEndsBarcodeData {
             barcode: 1,
             read_one_barcode: 2,
             read_two_barcode: 44,
@@ -288,10 +288,10 @@ mod test {
 
         let fp = "test_a.bytes";
         save_to_byte_file(&a, &mut File::create(fp).unwrap()).unwrap();
-        println!("{}", size_of::<ReadEndsForMarkDuplicatesWithBarcodes>());
+        println!("{}", size_of::<ReadEndsBarcodeData>());
         println!("{}", a_ser.len());
 
-        let a_deser: ReadEndsForMarkDuplicatesWithBarcodes = {
+        let a_deser: ReadEndsBarcodeData = {
             let mut byte_buf = Vec::new();
 
             File::open(fp).unwrap().read_to_end(&mut byte_buf).unwrap();

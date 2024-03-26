@@ -3,7 +3,7 @@ use core::fmt;
 use rust_htslib::bam::{self, ext::BamRecordExtensions, HeaderView, Record};
 use serde::{Deserialize, Serialize};
 
-use super::{physical_location::{impl_physical_location_core, PhysicalLocation, PhysicalLocationShort}, read_ends::{impl_physical_location_read_ends, impl_read_ends_ext, ReadEnds, ReadEndsExt}, read_ends_for_mark_duplicates_with_barcodes::ReadEndsForMarkDuplicatesWithBarcodes};
+use super::{physical_location::{impl_physical_location_core, PhysicalLocation, PhysicalLocationShort}, read_ends::{impl_physical_location_read_ends, impl_read_ends_ext, ReadEnds, ReadEndsExt}, read_ends_for_mark_duplicates_with_barcodes::ReadEndsBarcodeData};
 
 
 /**
@@ -14,12 +14,12 @@ use super::{physical_location::{impl_physical_location_core, PhysicalLocation, P
 #[derive(Serialize, Deserialize, Clone)]
 pub(crate) struct ReadEndsForMarkDuplicates {
     pub(crate) score: i16,
-    read1_index_in_file: i64,
-    read2_index_in_file: i64,
-    duplicate_set_size: i32,
+    pub(crate) read1_index_in_file: i64,
+    pub(crate) read2_index_in_file: i64,
+    pub(crate) duplicate_set_size: i32,
 
     pub(crate) read_ends: ReadEnds,
-    pub(crate) barcode_data: Option<ReadEndsForMarkDuplicatesWithBarcodes>,
+    pub(crate) barcode_data: Option<ReadEndsBarcodeData>,
 }
 
 impl ReadEndsExt for ReadEndsForMarkDuplicates {
