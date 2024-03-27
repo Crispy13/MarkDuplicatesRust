@@ -7,7 +7,7 @@ pub(crate) struct EstimateLibraryComplexity {
 }
 
 impl EstimateLibraryComplexity {
-    fn get_read_barcode_value(rec:&Record, tag: &str) -> u64 {
+    pub(crate) fn get_read_barcode_value(rec:&Record, tag: &str) -> u64 {
         if tag.is_empty() {
             return 0;
         }

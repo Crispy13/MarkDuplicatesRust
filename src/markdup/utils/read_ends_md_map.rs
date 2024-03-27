@@ -25,7 +25,7 @@ impl DiskBasedReadEndsForMarkDuplicatesMap {
         &mut self,
         mate_sequence_index: i32,
         key: &str,
-    ) -> Result<ReadEndsForMarkDuplicates, Error> {
+    ) -> Result<Option<ReadEndsForMarkDuplicates>, Error> {
         self.pair_info_map.remove(mate_sequence_index, key)
     }
 
@@ -92,20 +92,21 @@ pub(crate) enum ReadEndsForMarkDuplicatesMap {
 }
 
 impl ReadEndsForMarkDuplicatesMap {
-    fn remove(
+    pub(crate) fn remove(
         &mut self,
         mate_sequence_index: i32,
         key: &str,
-    ) -> Result<ReadEndsForMarkDuplicates, Error> {
+    ) -> Result<Option<ReadEndsForMarkDuplicates>, Error> {
         match self {
-            ReadEndsForMarkDuplicatesMap::MemoryBased(m) => m
-                .remove(mate_sequence_index as usize, key)
-                .ok_or_else(|| anyhow!("None")),
-            ReadEndsForMarkDuplicatesMap::DiskBased(m) => m.remove(mate_sequence_index, key),
+            ReadEndsForMarkDuplicatesMap::MemoryBased(m) => {
+                Ok(m.remove(mate_sequence_index as usize, key))
+            }
+
+            ReadEndsForMarkDuplicatesMap::DiskBased(m) => Ok(m.remove(mate_sequence_index, key)?),
         }
     }
 
-    fn put(
+    pub(crate) fn put(
         &mut self,
         mate_sequence_index: i32,
         key: String,

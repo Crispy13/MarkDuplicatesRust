@@ -1,8 +1,8 @@
-use std::{collections::HashSet, mem::size_of};
+use std::{collections::HashSet, fmt::Write, mem::size_of};
 
 use rust_htslib::bam::{
     ext::BamRecordExtensions,
-    record::{Aux, SAMReadGroupRecord},
+    record::{Aux, RecordExt, SAMReadGroupRecord},
     HeaderView, IndexedReader, Read, Record,
 };
 
@@ -10,17 +10,19 @@ use crate::{
     cmdline::cli::Cli,
     hts::{duplicate_scoring_strategy::DuplicateScoringStrategy, SAMTag, SortOrder},
     markdup::{
+        estimate_library_complexity::EstimateLibraryComplexity,
         umi_utils::UmiUtil,
         utils::{
             library_id_generator::LibraryIdGenerator,
-            read_ends::ReadEnds,
+            read_ends::{ReadEnds, ReadEndsExt},
             read_ends_md_map::{
                 DiskBasedReadEndsForMarkDuplicatesMap, MemoryBasedReadEndsForMarkDuplicatesMap,
                 ReadEndsForMarkDuplicatesMap,
             },
             read_name_parser::ReadNameParserExt,
         },
-    }, utils::{hash_code, CommonHasher},
+    },
+    utils::{hash_code, CommonHasher},
 };
 
 use super::utils::{
@@ -33,18 +35,19 @@ use super::utils::{
 use anyhow::{anyhow, Error};
 
 pub(crate) struct MarkDuplicates {
-    indexed_reader: IndexedReader,
     pg_ids_seen: HashSet<String>,
     library_id_generator: LibraryIdGenerator,
     optical_duplicate_finder: OpticalDuplicateFinder,
     cli: Cli,
+
+    frag_sort: Vec<ReadEndsForMarkDuplicates>,
 }
 
 impl MarkDuplicates {
     const NO_SUCH_INDEX: i64 = i64::MAX;
 
     fn build_sorted_read_end_vecs(&mut self, use_barcodes: bool) -> Result<(), Error> {
-        let indexed_reader = &mut self.indexed_reader;
+        let mut indexed_reader = self.open_inputs()?;
 
         let size_in_bytes = size_of::<ReadEndsForMarkDuplicates>();
 
@@ -57,9 +60,9 @@ impl MarkDuplicates {
 
         indexed_reader.fetch(".")?;
 
-        let mut record = Record::new();
+        let mut rec = Record::new();
 
-        let tmp = match assumed_sort_order {
+        let mut tmp = match assumed_sort_order {
             SortOrder::QueryName => ReadEndsForMarkDuplicatesMap::MemoryBased(
                 MemoryBasedReadEndsForMarkDuplicatesMap::new(),
             ),
@@ -72,10 +75,12 @@ impl MarkDuplicates {
 
         let mut index = 0;
 
-        while let Some(read_res) = indexed_reader.read(&mut record) {
+        while let Some(read_res) = indexed_reader.read(&mut rec) {
             // Just unwrap `Result` to check the reading process successful.
             // If Err, it means that bam file may be corrupted. Don't need to recover this error.
             read_res.unwrap();
+
+            let qname = std::str::from_utf8(rec.qname())?;
 
             // This doesn't have anything to do with building sorted ReadEnd lists, but it can be done in the same pass
             // over the input
@@ -85,7 +90,7 @@ impl MarkDuplicates {
                 // - to know what PG IDs are already used to avoid collisions when creating new ones.
                 // Note that if there are one or more records that do not have a PG tag, then a null value
                 // will be stored in this set.
-                match record.aux(SAMTag::PG.name().as_bytes()) {
+                match rec.aux(SAMTag::PG.name().as_bytes()) {
                     Ok(aux) => match aux {
                         rust_htslib::bam::record::Aux::String(pg) => {
                             if !self.pg_ids_seen.contains(pg) {
@@ -104,27 +109,84 @@ impl MarkDuplicates {
 
             // If working in query-sorted, need to keep index of first record with any given query-name.
             if matches!(assumed_sort_order, SortOrder::QueryName)
-                && !record.qname().eq(duplicate_query_name.as_bytes())
+                && !rec.qname().eq(duplicate_query_name.as_bytes())
             {
                 duplicate_query_name.clear();
-                duplicate_query_name.push_str(std::str::from_utf8(record.qname())?);
+                duplicate_query_name.push_str(qname);
 
                 duplicate_index = index;
             }
 
-            if record.is_unmapped() {
-                if record.tid() == -1 && matches!(assumed_sort_order, SortOrder::Coordinate) {
+            if rec.is_unmapped() {
+                if rec.tid() == -1 && matches!(assumed_sort_order, SortOrder::Coordinate) {
                     // When we hit the unmapped reads with no coordinate, no reason to continue (only in coordinate sort).
                     break;
                 }
 
                 // If this read is unmapped but sorted with the mapped reads, just skip it.
-            } else if !(record.is_secondary() || record.is_supplementary()) {
+            } else if !(rec.is_secondary() || rec.is_supplementary()) {
                 let index_for_read = match assumed_sort_order {
                     SortOrder::QueryName => duplicate_index,
                     _ => index,
                 };
-                // let fragment_end =
+                let fragment_end =
+                    self.build_read_ends(&rec.header().unwrap(), index, &rec, use_barcodes)?;
+
+                if rec.is_paired() && !rec.is_mate_unmapped() {
+                    let mut key = String::new();
+
+                    write!(
+                        &mut key,
+                        "{}{}",
+                        rec.get_read_group()?.get_read_group_id(),
+                        qname
+                    )
+                    .unwrap();
+
+                    let paired_ends_opt = tmp.remove(rec.tid(), &key)?;
+
+                    let mut paired_ends;
+                    // See if we've already seen the first end or not
+                    if paired_ends_opt.is_none() {
+                        // at this point pairedEnds and fragmentEnd are the same, but we need to make
+                        // a copy since pairedEnds will be modified when the mate comes along.
+                        paired_ends = fragment_end.clone();
+                        tmp.put(paired_ends.read2_index_in_file, key, paired_ends)?;
+                    } else {
+                        paired_ends = paired_ends_opt.unwrap();
+
+                        let mates_ref_index = fragment_end.read_ends.read1_reference_index;
+                        let mates_coordinate = fragment_end.read_ends.read1_coordinate;
+
+                        // Set orientationForOpticalDuplicates, which always goes by the first then the second end for the strands.  NB: must do this
+                        // before updating the orientation later.
+                        if rec.is_first_in_template() {
+                            paired_ends.read_ends.orientation_for_optical_duplicates =
+                                ReadEnds::get_orientation_bytes(
+                                    rec.is_reverse(),
+                                    paired_ends.read_ends.orientation == ReadEnds::R,
+                                );
+
+                            if use_barcodes {
+                                paired_ends.barcode_data.as_mut().unwrap().read_one_barcode =
+                                    self.get_read_one_barcode_value(&rec);
+                            }
+                        } else {
+                            paired_ends.read_ends.orientation_for_optical_duplicates =
+                                ReadEnds::get_orientation_bytes(
+                                    paired_ends.read_ends.orientation == ReadEnds::R,
+                                    rec.is_reverse(),
+                                );
+
+                            if use_barcodes {
+                                paired_ends.barcode_data.as_mut().unwrap().read_two_barcode =
+                                    self.get_read_two_barcode_value(&rec);
+                            }
+                        }
+                    }
+                }
+
+                self.frag_sort.push(fragment_end);
             }
         }
 
@@ -230,15 +292,24 @@ impl MarkDuplicates {
             read_ends_for_md.barcode_data = Some(barcode_data);
         }
 
-        todo!()
+        Ok(read_ends_for_md)
     }
 
-    fn get_read_one_barcode_value(&self, rec: &Record) -> i32 {
-        todo!()
+    fn get_read_one_barcode_value(&self, rec: &Record) -> u64 {
+        EstimateLibraryComplexity::get_read_barcode_value(rec, &self.cli.READ_ONE_BARCODE_TAG)
     }
 
-    fn get_read_two_barcode_value(&self, rec: &Record) -> i32 {
-        todo!()
+    fn get_read_two_barcode_value(&self, rec: &Record) -> u64 {
+        EstimateLibraryComplexity::get_read_barcode_value(rec, &self.cli.READ_TWO_BARCODE_TAG)
+    }
+
+    fn open_inputs(&self) -> Result<IndexedReader, Error> {
+        assert!(
+            self.cli.INPUT.len() == 1,
+            "Running with multiple input bams is not supported yet."
+        );
+
+        Ok(IndexedReader::from_path(self.cli.INPUT.first().unwrap())?)
     }
 }
 

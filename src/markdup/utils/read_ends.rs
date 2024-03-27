@@ -7,7 +7,7 @@ use super::physical_location::{
 #[derive(Serialize, Deserialize, Clone)]
 pub(crate) struct ReadEnds {
     pub(crate) library_id: i16,
-    pub(crate) orientation: u8,
+    pub(crate) orientation: i8,
     pub(crate) read1_reference_index: i32,
     pub(crate) read1_coordinate: i32,
     pub(crate) read2_reference_index: i32,
@@ -49,12 +49,12 @@ impl Default for ReadEnds {
 }
 
 impl ReadEnds {
-    pub(crate) const F: u8 = 0;
-    pub(crate) const R: u8 = 1;
-    pub(crate) const FF: u8 = 2;
-    pub(crate) const FR: u8 = 3;
-    pub(crate) const RR: u8 = 4;
-    pub(crate) const RF: u8 = 5;
+    pub(crate) const F: i8 = 0;
+    pub(crate) const R: i8 = 1;
+    pub(crate) const FF: i8 = 2;
+    pub(crate) const FR: i8 = 3;
+    pub(crate) const RR: i8 = 4;
+    pub(crate) const RF: i8 = 5;
 }
 
 impl PhysicalLocation for ReadEnds {
@@ -91,8 +91,8 @@ pub(crate) trait ReadEndsExt {
     /**
      * Returns a single byte that encodes the orientation of the two reads in a pair.
      */
-    fn get_orientation_bytes(&self, read1_negative_strand: bool, read2_negative_strand: bool)
-        -> u8;
+    fn get_orientation_bytes(read1_negative_strand: bool, read2_negative_strand: bool)
+        -> i8;
 }
 
 impl ReadEndsExt for ReadEnds {
@@ -105,7 +105,7 @@ macro_rules! impl_read_ends_ext {
             $read_end.read2_reference_index != -1
         }
 
-        fn get_orientation_bytes(&$self, read1_negative_strand: bool, read2_negative_strand: bool) -> u8 {
+        fn get_orientation_bytes(read1_negative_strand: bool, read2_negative_strand: bool) -> i8 {
             // maybe match would be better.
             if read1_negative_strand {
                 if read2_negative_strand {

@@ -55,4 +55,27 @@ pub(crate) struct Cli {
         default_value_t = false,
     )]
     pub(crate) DUPLEX_UMI: bool,
+
+    /// Read one barcode SAM tag (ex. BX for 10X Genomics)
+    #[arg(
+        long = "READ_ONE_BARCODE_TAG",
+        value_name = "String",
+        default_value_t = String::new(),
+    )]
+    pub(crate) READ_ONE_BARCODE_TAG: String,
+
+    /// Read two barcode SAM tag (ex. BX for 10X Genomics)
+    #[arg(
+        long = "READ_TWO_BARCODE_TAG",
+        value_name = "String",
+        default_value_t = String::new(),
+    )]
+    pub(crate) READ_TWO_BARCODE_TAG: String,
+
+    /// One or more input SAM, BAM or CRAM files to analyze. Must be coordinate sorted.
+    #[arg(
+        long = "INPUT",
+        value_name = "String",
+    )]
+    pub(crate) INPUT: Vec<String>,
 }

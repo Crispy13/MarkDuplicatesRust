@@ -9,8 +9,8 @@ use super::{
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub(crate) struct ReadEndsBarcodeData {
     pub(crate) barcode: u64,          // primary barcode for this read (and pair)
-    pub(crate) read_one_barcode: i32, // read one barcode, 0 if not present
-    pub(crate) read_two_barcode: i32, // read two barcode, 0 if not present or not paired
+    pub(crate) read_one_barcode: u64, // read one barcode, 0 if not present
+    pub(crate) read_two_barcode: u64, // read two barcode, 0 if not present or not paired
 
                                       // pub(crate) read_ends_for_mark_duplicates: ReadEndsForMarkDuplicates,
 }
@@ -27,8 +27,8 @@ impl Default for ReadEndsBarcodeData {
 
 impl ReadEndsBarcodeData {
     const BARCODE_DEFAULT:u64 = 0;
-    const READ_ONE_BARCODE_DEFAULT:i32 = 0;
-    const READ_TWO_BARCODE_DEFAULT:i32 = 0;
+    const READ_ONE_BARCODE_DEFAULT:u64 = 0;
+    const READ_TWO_BARCODE_DEFAULT:u64 = 0;
 }
 
 // impl ReadEndsExt for ReadEndsForMarkDuplicatesWithBarcodes {

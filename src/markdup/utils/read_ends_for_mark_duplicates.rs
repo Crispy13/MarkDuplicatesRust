@@ -15,7 +15,7 @@ use super::{physical_location::{impl_physical_location_core, PhysicalLocation, P
 pub(crate) struct ReadEndsForMarkDuplicates {
     pub(crate) score: i16,
     pub(crate) read1_index_in_file: i64,
-    pub(crate) read2_index_in_file: i64,
+    pub(crate) read2_index_in_file: i32,
     pub(crate) duplicate_set_size: i32,
 
     pub(crate) read_ends: ReadEnds,

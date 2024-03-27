@@ -82,7 +82,7 @@ where
 {
     type DataCodec;
 
-    fn remove<Q: ?Sized>(&mut self, sequence_index: i32, key: &Q) -> Result<R, Error>
+    fn remove<Q: ?Sized>(&mut self, sequence_index: i32, key: &Q) -> Result<Option<R>, Error>
     where
         K: Borrow<Q>,
         Q: Hash + Eq;
@@ -103,7 +103,7 @@ where
 {
     type DataCodec = (K, R);
 
-    fn remove<Q: ?Sized>(&mut self, sequence_index: i32, key: &Q) -> Result<R, Error>
+    fn remove<Q: ?Sized>(&mut self, sequence_index: i32, key: &Q) -> Result<Option<R>, Error>
     where
         K: Borrow<Q>,
         Q: Hash + Eq,
@@ -112,7 +112,11 @@ where
             Err(anyhow!("Cannot be called when iteration is in progress"))?
         } else {
             self.ensure_sequence_loaded(sequence_index)?;
-            Ok(self.map_in_ram.as_mut().unwrap().remove(key).unwrap())
+            Ok(
+                self.map_in_ram.as_mut()
+                .unwrap() // we can assure that `map_in_ram` is Some
+                .remove(key)
+            )
         }
     }
 
@@ -170,7 +174,8 @@ where
                     if map_in_ram.contains_key(&key) {
                         Err(anyhow!(
                             "Value was put into PairInfoMap more than once.  {}: {}",
-                            sequence_index, key
+                            sequence_index,
+                            key
                         ))?
                     }
 
@@ -215,7 +220,8 @@ where
                 if map_in_ram.contains_key(&key) {
                     Err(anyhow!(
                         "Putting value into PairInfoMap that already existed. {}: {}",
-                        sequence_index, key
+                        sequence_index,
+                        key
                     ))?
                 }
 
