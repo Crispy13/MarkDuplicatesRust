@@ -22,7 +22,7 @@ use crate::{
             read_name_parser::ReadNameParserExt,
         },
     },
-    utils::{hash_code, CommonHasher},
+    utils::{hash_code, logging::ProgressLogger, CommonHasher},
 };
 
 use super::utils::{
@@ -151,8 +151,17 @@ impl MarkDuplicates {
                         // at this point pairedEnds and fragmentEnd are the same, but we need to make
                         // a copy since pairedEnds will be modified when the mate comes along.
                         paired_ends = fragment_end.clone();
-                        tmp.put(paired_ends.read2_index_in_file, key, paired_ends)?;
+
+                        self.frag_sort.push(fragment_end);
+
+                        tmp.put(
+                            paired_ends.read_ends.read2_reference_index,
+                            key,
+                            paired_ends,
+                        )?;
                     } else {
+                        self.frag_sort.push(fragment_end);
+                        
                         paired_ends = paired_ends_opt.unwrap();
 
                         let mates_ref_index = fragment_end.read_ends.read1_reference_index;
@@ -183,11 +192,58 @@ impl MarkDuplicates {
                                     self.get_read_two_barcode_value(&rec);
                             }
                         }
+
+                        // If the other read is actually later, simply add the other read's data as read2, else flip the reads
+                        if mates_ref_index > paired_ends.read_ends.read1_reference_index
+                            || (mates_ref_index == paired_ends.read_ends.read1_reference_index
+                                && mates_coordinate >= paired_ends.read_ends.read1_coordinate)
+                        {
+                            paired_ends.read_ends.read2_reference_index = mates_ref_index;
+                            paired_ends.read_ends.read2_coordinate = mates_coordinate;
+                            paired_ends.read2_index_in_file = index_for_read;
+                            paired_ends.read_ends.orientation = ReadEnds::get_orientation_bytes(
+                                paired_ends.read_ends.orientation == ReadEnds::R,
+                                rec.is_reverse(),
+                            );
+
+                            // if the two read ends are in the same position, pointing in opposite directions,
+                            // the orientation is undefined and the procedure above
+                            // will depend on the order of the reads in the file.
+                            // To avoid this, we set it explicitly (to FR):
+                            if paired_ends.read_ends.read2_reference_index
+                                == paired_ends.read_ends.read1_reference_index
+                                && paired_ends.read_ends.read2_coordinate
+                                    == paired_ends.read_ends.read1_coordinate
+                                && paired_ends.read_ends.orientation == ReadEnds::RF
+                            {
+                                paired_ends.read_ends.orientation = ReadEnds::FR;
+                            }
+                        } else {
+                            paired_ends.read_ends.read2_reference_index =
+                                paired_ends.read_ends.read1_reference_index;
+                            paired_ends.read_ends.read2_coordinate =
+                                paired_ends.read_ends.read1_coordinate;
+                            paired_ends.read2_index_in_file = paired_ends.read1_index_in_file;
+
+                            paired_ends.read_ends.read1_reference_index = mates_ref_index;
+                            paired_ends.read_ends.read1_coordinate = mates_coordinate;
+                            paired_ends.read1_index_in_file = index_for_read;
+                            paired_ends.read_ends.orientation = ReadEnds::get_orientation_bytes(
+                                rec.is_reverse(),
+                                paired_ends.read_ends.orientation == ReadEnds::R,
+                            );
+                        }
+
+                        paired_ends.score += self.get_read_duplicate_score(&rec, &paired_ends);
+                        self.frag_sort.push(paired_ends);
                     }
                 }
-
-                self.frag_sort.push(fragment_end);
             }
+
+            // Print out some stats every 1m reads
+            index+=1;
+            
+
         }
 
         todo!()
@@ -310,6 +366,18 @@ impl MarkDuplicates {
         );
 
         Ok(IndexedReader::from_path(self.cli.INPUT.first().unwrap())?)
+    }
+
+    fn get_read_duplicate_score(
+        &self,
+        rec: &Record,
+        paired_ends: &ReadEndsForMarkDuplicates,
+    ) -> i16 {
+        DuplicateScoringStrategy::compute_duplicate_score(
+            rec,
+            self.cli.DUPLICATE_SCORING_STRATEGY,
+            false,
+        ).unwrap() // we can use unwrap() with assume_mate_cigar = false;
     }
 }
 

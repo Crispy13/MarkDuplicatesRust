@@ -1,6 +1,7 @@
 use std::borrow::{Borrow, BorrowMut};
 use std::fmt;
 use std::sync::{Mutex, OnceLock};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use log::{logger, LevelFilter};
 use log4rs::append::console::{ConsoleAppender, Target};
@@ -8,13 +9,14 @@ use log4rs::append::file::FileAppender;
 use log4rs::config::runtime::ConfigBuilder;
 use log4rs::config::{Appender, Config, Logger, Root};
 use log4rs::encode::pattern::PatternEncoder;
+use rust_htslib::bam::Record;
 
 struct RuntimeLogConfig {
     handle: log4rs::Handle,
     root_level: LevelFilter,
 }
 
-const LOG_DEST_STDERR:&'static str = "stderr";
+const LOG_DEST_STDERR: &'static str = "stderr";
 pub(crate) fn add_logger_and_set_config(logger: Logger) {
     let mut logger_vec = logger_vec().lock().unwrap();
     logger_vec.push(logger);
@@ -94,20 +96,112 @@ pub(crate) fn init_global_logger(level: LevelFilter) {
 
 pub(crate) struct ProgressLogger {
     log: String,
-    n: u32,
+    n: usize,
     verb: &'static str,
     noun: &'static str,
+
+    last_chrom: String,
+    last_pos: i64,
+    last_read_name: String,
+
+    start_time: Instant,
+    last_start_time: Option<Instant>,
+    count_non_increasing: i64,
+
+    processed: usize,
 }
 
 impl ProgressLogger {
-    
-
-    pub(crate) fn new(log: String, n: u32, verb: &'static str, noun: &'static str) -> Self {
-        Self { log, n, verb, noun }
+    pub(crate) fn new(log: String, n: usize, verb: &'static str, noun: &'static str) -> Self {
+        Self {
+            log,
+            n,
+            verb,
+            noun,
+            start_time: Instant::now(),
+            processed: 0,
+            last_start_time: None,
+            last_chrom: String::new(),
+            last_pos: 0,
+            last_read_name: String::new(),
+            count_non_increasing: 0,
+        }
     }
 
-    pub(crate) fn record(&self, chrom:impl fmt::Display, pos:i32) {
-        const level: &str="info";
+    pub(crate) fn record(&mut self, rec: &Record) -> bool {
+        if b"*".eq(rec.qname()) {
+            self.check_and_then_record("", 0, rec.qname())
+        }
+    }
+
+    fn check_and_then_record(&mut self, chrom: &str, pos: i64, rname: &str) -> bool {
+        if !chrom.is_empty() && chrom.eq(&self.last_chrom) && pos < self.last_pos {
+            self.count_non_increasing += 1;
+        } else {
+            self.last_chrom.clear();
+            self.last_chrom.push_str(chrom);
+        }
+
+        self.last_pos = pos;
+        self.last_read_name.clear();
+        self.last_read_name.push_str(rname);
+
+        if self.last_start_time.is_none() {
+            self.last_start_time = Some(Instant::now());
+        }
+
+        self.processed += 1;
+        if self.processed % self.n == 0 {
+            self.__record();
+            true
+        } else {
+            false
+        }
+    }
+
+    fn __record(&self) {
+        let instant = self.last_start_time.as_ref().unwrap();
+        let last_period_seconds = instant.elapsed().as_secs();
+
+        let seconds = instant.duration_since(self.start_time).as_secs();
+
+        let elapsed = format_elapsed_time(seconds);
+        let period = pad(&last_period_seconds.to_string(), 4);
+        let processed = pad(&self.processed.to_string(), 13);
+
+        let read_info = if self.last_chrom.is_empty() {
+            "*/*".to_string()
+        } else {
+            format!("{}:{}", self.last_chrom, self.last_pos)
+        };
+
+        let rn_info = if !self.last_read_name.is_empty() && self.count_non_increasing > 1000 {
+            format!(".  Last read name: {}", self.last_read_name)
+        } else {
+            "".to_string()
+        };
+
+        let n = if self.processed % self.n == 0 {
+            self.n
+        } else {
+            self.processed % self.n
+        };
+
+        log::info!(target: &self.log,
+            "{} {} {} .  Elapsed time: {}s.  Time for last {}: {}s.  Last read position: {}{}",
+            self.verb,
+            processed,
+            self.noun,
+            elapsed,
+            n,
+            period,
+            read_info,
+            rn_info
+        );
+    }
+
+    fn _record(&self, chrom: impl fmt::Display, pos: i32) {
+        const level: &str = "info";
         macro_rules! do_log {
             ($level:tt) => {
                 log::$level!(target: self.log.as_str(), "chr={} pos={} {} {}.", chrom, pos, self.noun, self.verb);
@@ -125,7 +219,7 @@ impl ProgressLogger {
 
                     _ => unreachable!(),
                 }
-                
+
             };
         }
 
@@ -133,7 +227,26 @@ impl ProgressLogger {
     }
 }
 
+fn format_elapsed_time(seconds: u64) -> String {
+    let s = seconds % 60;
+    let all_minutes = seconds / 60;
+    let m = all_minutes % 60;
+    let h = all_minutes / 60;
 
+    format!("{:0>2}:{:0>2}:{:0>2}", h, m, s)
+}
+
+fn pad(s: &str, length: usize) -> String {
+    let mut in_builder = String::with_capacity(length.max(s.len()));
+
+    while in_builder.len() < length - s.len() {
+        in_builder.push_str(" ");
+    }
+
+    in_builder.push_str(s);
+
+    in_builder
+}
 
 #[cfg(test)]
 mod test {
@@ -146,13 +259,13 @@ mod test {
         log::info!(target:"A", "Hey A1 info!");
 
         add_logger_and_set_config(
-            Logger::builder().additive(true).build("A", LevelFilter::Debug)
+            Logger::builder()
+                .additive(true)
+                .build("A", LevelFilter::Debug),
         );
 
         log::debug!(target:"A", "Hey A2 debug!");
         log::info!(target:"A", "Hey A2 info!");
-
-        
     }
 
     #[test]
@@ -162,8 +275,7 @@ mod test {
         let pr1 = ProgressLogger::new("A".to_owned(), 10000, "compared", "ReadEnds to Keeper");
         let pr2 = ProgressLogger::new("B".to_owned(), 1000, "compared", "ReadEnds to Keeper");
 
-        pr1.record("chr1", 121212,);
-        pr2.record("chr2", 34343434, );
-
+        pr1._record("chr1", 121212);
+        pr2._record("chr2", 34343434);
     }
 }

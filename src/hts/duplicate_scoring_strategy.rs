@@ -51,6 +51,7 @@ impl DuplicateScoringStrategy {
     /// # Errors
     ///
     /// This function will return an error if it fails to get mate cigar.
+    /// If you give `false` to `assume_mate_cigar`, this is infallable.
     pub(crate) fn compute_duplicate_score(
         rec: &Record,
         scoring_strategy: ScoringStrategy,
