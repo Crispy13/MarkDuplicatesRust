@@ -37,6 +37,14 @@ impl DiskBasedReadEndsForMarkDuplicatesMap {
     ) -> Result<(), Error> {
         self.pair_info_map.put(mate_sequence_index, key, read_ends)
     }
+
+    fn size(&self) -> usize {
+        self.pair_info_map.size()
+    }
+
+    fn size_in_ram(&self) -> usize {
+        self.pair_info_map.size_in_ram()
+    }
 }
 
 pub(crate) struct MemoryBasedReadEndsForMarkDuplicatesMap {
@@ -119,6 +127,20 @@ impl ReadEndsForMarkDuplicatesMap {
             ReadEndsForMarkDuplicatesMap::DiskBased(m) => {
                 m.put(mate_sequence_index, key, read_ends)
             }
+        }
+    }
+
+    pub(crate) fn size(&self) -> usize {
+        match self {
+            ReadEndsForMarkDuplicatesMap::MemoryBased(m) => m.size(),
+            ReadEndsForMarkDuplicatesMap::DiskBased(m) => m.size(),
+        }
+    }
+
+    pub(crate) fn size_in_ram(&self) -> usize {
+        match self {
+            ReadEndsForMarkDuplicatesMap::MemoryBased(m) => m.size_in_ram(),
+            ReadEndsForMarkDuplicatesMap::DiskBased(m) => m.size_in_ram(),
         }
     }
 }

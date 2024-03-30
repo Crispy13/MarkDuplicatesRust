@@ -41,9 +41,12 @@ pub(crate) struct MarkDuplicates {
     cli: Cli,
 
     frag_sort: Vec<ReadEndsForMarkDuplicates>,
+    pair_sort: Vec<ReadEndsForMarkDuplicates>,
 }
 
 impl MarkDuplicates {
+    #[allow(non_upper_case_globals)]
+    const log:&'static str = stringify!(MarkDuplicates);
     const NO_SUCH_INDEX: i64 = i64::MAX;
 
     fn build_sorted_read_end_vecs(&mut self, use_barcodes: bool) -> Result<(), Error> {
@@ -74,6 +77,8 @@ impl MarkDuplicates {
         };
 
         let mut index = 0;
+
+        let mut progress = ProgressLogger::new(Self::log, 10_usize.pow(6), "Read", "records");
 
         while let Some(read_res) = indexed_reader.read(&mut rec) {
             // Just unwrap `Result` to check the reading process successful.
@@ -160,12 +165,12 @@ impl MarkDuplicates {
                             paired_ends,
                         )?;
                     } else {
-                        self.frag_sort.push(fragment_end);
-                        
                         paired_ends = paired_ends_opt.unwrap();
 
                         let mates_ref_index = fragment_end.read_ends.read1_reference_index;
                         let mates_coordinate = fragment_end.read_ends.read1_coordinate;
+
+                        self.frag_sort.push(fragment_end);
 
                         // Set orientationForOpticalDuplicates, which always goes by the first then the second end for the strands.  NB: must do this
                         // before updating the orientation later.
@@ -235,16 +240,25 @@ impl MarkDuplicates {
                         }
 
                         paired_ends.score += self.get_read_duplicate_score(&rec, &paired_ends);
-                        self.frag_sort.push(paired_ends);
+                        self.pair_sort.push(paired_ends);
                     }
                 }
             }
 
             // Print out some stats every 1m reads
             index+=1;
+            if progress.record(&rec) {
+                log::info!(target: Self::log, 
+                    "Tracking {} as yet unmatched pairs. {} records in RAM.", tmp.size(), tmp.size_in_ram(),
+                );
+            }
             
 
         }
+
+        log::info!(target: Self::log, "Read {} records. {} pairs never matched.", index, tmp.size());
+
+        // Tell these collections to free up memory if possible.
 
         todo!()
     }

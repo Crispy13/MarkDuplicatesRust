@@ -51,6 +51,8 @@ impl SortOrder {
 }
 
 
+
+
 #[cfg(test)]
 mod test {
     use rust_htslib::bam::{IndexedReader, Read, Record};

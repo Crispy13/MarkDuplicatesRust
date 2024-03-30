@@ -61,13 +61,13 @@ where
         })
     }
 
-    fn size(&self) -> usize {
+    pub(crate) fn size(&self) -> usize {
         self.size_of_map_on_disk
             .values()
             .fold(self.size_in_ram(), |a, b| a + b)
     }
 
-    fn size_in_ram(&self) -> usize {
+    pub(crate) fn size_in_ram(&self) -> usize {
         match self.map_in_ram {
             Some(ref m) => m.len(),
             None => 0,

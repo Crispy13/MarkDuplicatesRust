@@ -8,9 +8,13 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0.81"
 bincode = "1.3.3"
+bio-types = "1.0.1"
 clap = { version = "4.5.3", features = ["derive"] }
 log = "0.4.21"
 log4rs = "1.3.0"
 regex = "1.10.4"
 rust-htslib = { path = "./deps/rust-htslib" }
 serde = { version = "1.0.197", features = ["derive"] }
+thiserror = "1.0.58"
+tikv-jemalloc-ctl = "0.5.4"
+tikv-jemallocator = "0.5.4"

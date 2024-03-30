@@ -1,5 +1,6 @@
 use std::borrow::{Borrow, BorrowMut};
 use std::fmt;
+use std::process::exit;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
@@ -10,6 +11,8 @@ use log4rs::config::runtime::ConfigBuilder;
 use log4rs::config::{Appender, Config, Logger, Root};
 use log4rs::encode::pattern::PatternEncoder;
 use rust_htslib::bam::Record;
+
+use bio_types::genome::AbstractInterval;
 
 struct RuntimeLogConfig {
     handle: log4rs::Handle,
@@ -95,7 +98,7 @@ pub(crate) fn init_global_logger(level: LevelFilter) {
 }
 
 pub(crate) struct ProgressLogger {
-    log: String,
+    log: &'static str,
     n: usize,
     verb: &'static str,
     noun: &'static str,
@@ -112,7 +115,7 @@ pub(crate) struct ProgressLogger {
 }
 
 impl ProgressLogger {
-    pub(crate) fn new(log: String, n: usize, verb: &'static str, noun: &'static str) -> Self {
+    pub(crate) fn new(log: &'static str, n: usize, verb: &'static str, noun: &'static str) -> Self {
         Self {
             log,
             n,
@@ -129,8 +132,15 @@ impl ProgressLogger {
     }
 
     pub(crate) fn record(&mut self, rec: &Record) -> bool {
-        if b"*".eq(rec.qname()) {
-            self.check_and_then_record("", 0, rec.qname())
+        let read_name = std::str::from_utf8(rec.qname()).unwrap_or_else(|err| {
+            eprintln!("{}", err);
+            panic!("Invalid UTF-8 encountered in read name.");
+        });
+
+        if "*".eq(read_name) {
+            self.check_and_then_record("", 0, read_name)
+        } else {
+            self.check_and_then_record(rec.contig(), rec.pos(), read_name)
         }
     }
 
@@ -204,7 +214,7 @@ impl ProgressLogger {
         const level: &str = "info";
         macro_rules! do_log {
             ($level:tt) => {
-                log::$level!(target: self.log.as_str(), "chr={} pos={} {} {}.", chrom, pos, self.noun, self.verb);
+                log::$level!(target: self.log, "chr={} pos={} {} {}.", chrom, pos, self.noun, self.verb);
             };
         }
 
@@ -272,8 +282,8 @@ mod test {
     fn progress_logger() {
         init_global_logger(LevelFilter::Debug);
 
-        let pr1 = ProgressLogger::new("A".to_owned(), 10000, "compared", "ReadEnds to Keeper");
-        let pr2 = ProgressLogger::new("B".to_owned(), 1000, "compared", "ReadEnds to Keeper");
+        let pr1 = ProgressLogger::new("A", 10000, "compared", "ReadEnds to Keeper");
+        let pr2 = ProgressLogger::new("B", 1000, "compared", "ReadEnds to Keeper");
 
         pr1._record("chr1", 121212);
         pr2._record("chr2", 34343434);
