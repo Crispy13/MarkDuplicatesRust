@@ -17,6 +17,8 @@ use crate::utils::PathExt;
 // type Error = Box<dyn std::error::Error + Send + Sync>;
 use anyhow::{anyhow, Error};
 
+use super::utils::{load_byte_file_as_obj, save_as_byte_to_file};
+
 struct FileAppendStreamLRUCache {
     cache_size: i32,
 }
@@ -112,11 +114,11 @@ where
             Err(anyhow!("Cannot be called when iteration is in progress"))?
         } else {
             self.ensure_sequence_loaded(sequence_index)?;
-            Ok(
-                self.map_in_ram.as_mut()
+            Ok(self
+                .map_in_ram
+                .as_mut()
                 .unwrap() // we can assure that `map_in_ram` is Some
-                .remove(key)
-            )
+                .remove(key))
         }
     }
 
@@ -147,7 +149,7 @@ where
                     // write read ends to file
                     map_in_ram
                         .drain()
-                        .map(|(k, v)| save_to_byte_file(&(k, v), &mut os))
+                        .map(|(k, v)| save_as_byte_to_file(&(k, v), &mut os))
                         .collect::<Result<Vec<_>, Error>>()?;
                 }
             } else {
@@ -228,7 +230,7 @@ where
                 map_in_ram.insert(key, record);
             } else {
                 let mut os = self.get_output_stream_for_sequence(sequence_index)?;
-                save_to_byte_file(&(key, record), &mut os)?;
+                save_as_byte_to_file(&(key, record), &mut os)?;
 
                 let prev_count = match self.size_of_map_on_disk.get(&sequence_index) {
                     Some(v) => *v,
@@ -251,22 +253,6 @@ impl<K, R> Drop for CoordinateSortedPairInfoMap<K, R> {
             .for_each(|fp| remove_file(fp).unwrap_or_else(|err| ()));
         //TODO: log a message when removing fails as debug level
     }
-}
-
-fn save_to_byte_file<T: Serialize>(value: &T, file: &mut File) -> Result<(), Error> {
-    let encoded = bincode::serialize(value)?;
-
-    file.write_all(&encoded)?;
-
-    Ok(())
-}
-
-fn load_byte_file_as_obj<T: for<'de> Deserialize<'de>>(file: &mut File) -> Result<T, Error> {
-    let mut byte_buf = Vec::with_capacity(size_of::<T>());
-
-    file.read_exact(&mut byte_buf)?;
-
-    Ok(bincode::deserialize(&byte_buf)?)
 }
 
 // pub(crate) trait SaveToByteFile {
@@ -293,7 +279,7 @@ mod test {
         let a_ser = bincode::serialize(&a).unwrap();
 
         let fp = "test_a.bytes";
-        save_to_byte_file(&a, &mut File::create(fp).unwrap()).unwrap();
+        save_as_byte_to_file(&a, &mut File::create(fp).unwrap()).unwrap();
         println!("{}", size_of::<ReadEndsBarcodeData>());
         println!("{}", a_ser.len());
 
