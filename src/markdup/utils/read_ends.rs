@@ -4,7 +4,7 @@ use super::physical_location::{
     impl_physical_location_core, PhysicalLocation, PhysicalLocationShort,
 };
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, PartialEq)]
 pub(crate) struct ReadEnds {
     pub(crate) library_id: i16,
     pub(crate) orientation: i8,
@@ -60,7 +60,6 @@ impl ReadEnds {
 impl PhysicalLocation for ReadEnds {
     impl_physical_location_core!(self, self.pls, i16);
     impl_physical_location_read_ends!(self, self);
-    
 }
 
 macro_rules! impl_physical_location_read_ends {
@@ -68,15 +67,15 @@ macro_rules! impl_physical_location_read_ends {
         fn get_read_group(&$self) -> i16 {
             $read_ends.read_group
         }
-    
+
         fn set_read_group(&mut $self, read_group: i16) {
             $read_ends.read_group = read_group;
         }
-    
+
         fn get_library_id(&$self) -> i16 {
             $read_ends.library_id
         }
-    
+
         fn set_library_id(&mut $self, library_id: i16) {
             $read_ends.library_id = library_id
         }
@@ -91,8 +90,7 @@ pub(crate) trait ReadEndsExt {
     /**
      * Returns a single byte that encodes the orientation of the two reads in a pair.
      */
-    fn get_orientation_bytes(read1_negative_strand: bool, read2_negative_strand: bool)
-        -> i8;
+    fn get_orientation_bytes(read1_negative_strand: bool, read2_negative_strand: bool) -> i8;
 }
 
 impl ReadEndsExt for ReadEnds {
@@ -126,5 +124,3 @@ macro_rules! impl_read_ends_ext {
 }
 
 pub(crate) use impl_read_ends_ext;
-
-

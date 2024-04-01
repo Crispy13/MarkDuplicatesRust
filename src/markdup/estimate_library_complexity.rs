@@ -2,12 +2,10 @@ use rust_htslib::bam::{record::RecordExt, Record};
 
 use crate::utils::hash_code;
 
-pub(crate) struct EstimateLibraryComplexity {
-
-}
+pub(crate) struct EstimateLibraryComplexity {}
 
 impl EstimateLibraryComplexity {
-    pub(crate) fn get_read_barcode_value(rec:&Record, tag: &str) -> u64 {
+    pub(crate) fn get_read_barcode_value(rec: &Record, tag: &str) -> u64 {
         if tag.is_empty() {
             return 0;
         }
@@ -18,7 +16,5 @@ impl EstimateLibraryComplexity {
         }
     }
 
-    fn get_read_one_barcode_value() {
-        
-    }
+    fn get_read_one_barcode_value() {}
 }

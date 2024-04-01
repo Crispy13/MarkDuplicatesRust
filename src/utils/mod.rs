@@ -176,7 +176,7 @@ pub(crate) fn human_readable_byte_count(bytes: usize) -> String {
     }
 
     let exp = ((bytes as f64).ln() / 1024_f64.ln()) as usize;
-    
+
     format!(
         "{:.1} {}B",
         bytes as f64 / 1024_usize.pow(exp as u32) as f64,
@@ -191,7 +191,9 @@ mod test {
 
     use std::hash::DefaultHasher;
 
-    use crate::utils::{get_allocated_and_resident_mem_of_app, get_allocated_mem_of_app, human_readable_byte_count};
+    use crate::utils::{
+        get_allocated_and_resident_mem_of_app, get_allocated_mem_of_app, human_readable_byte_count,
+    };
 
     use super::{get_resident_mem_of_app, CommonHasher};
 

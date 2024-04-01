@@ -1,10 +1,22 @@
-use std::{collections::{BTreeSet, HashSet}, fs::File, io::{BufReader, BufWriter, Read}, iter::Peekable, marker::PhantomData, mem::size_of, ops::{Deref, DerefMut}, path::PathBuf};
+use std::{
+    collections::{BTreeSet, HashSet},
+    fs::File,
+    io::{BufReader, BufWriter, Read},
+    iter::Peekable,
+    marker::PhantomData,
+    mem::size_of,
+    ops::{Deref, DerefMut},
+    path::PathBuf,
+};
 
+use anyhow::Error;
 use serde::{Deserialize, Serialize};
 use tempfile::{tempfile, NamedTempFile, TempPath};
-use anyhow::Error;
 
-use crate::{hts::utils::save_as_byte_to_file, utils::{get_allocated_and_resident_mem_of_app, human_readable_byte_count, mem_stats}};
+use crate::{
+    hts::utils::save_as_byte_to_file,
+    utils::{get_allocated_and_resident_mem_of_app, human_readable_byte_count, mem_stats},
+};
 
 use super::load_byte_file_as_obj;
 
@@ -40,14 +52,14 @@ pub(crate) struct SortingCollection<T> {
 
     print_record_size_sampling: bool,
 
-    files:Vec<TempPath>,
+    files: Vec<TempPath>,
 
-    cleaned_up:bool,
+    cleaned_up: bool,
 }
 
 impl<T> SortingCollection<T>
 where
-    T: Ord + Serialize + for<'de> Deserialize<'de>
+    T: Ord + Serialize + for<'de> Deserialize<'de>,
 {
     #[allow(non_upper_case_globals)]
     const log: &'static str = stringify!(SortingCollection);
@@ -74,10 +86,9 @@ where
 
                 let used_bytes = end_mem - start_mem;
 
-                log::debug!(target: Self::log, 
-                    "{} records in ram required approximately {} memory or {} per record. ", 
-                    self.max_records_in_ram, 
-                    human_readable_byte_count(used_bytes), 
+                log::debug!(target: Self::log, "{} records in ram required approximately {} memory or {} per record. ",
+                    self.max_records_in_ram,
+                    human_readable_byte_count(used_bytes),
                     human_readable_byte_count(used_bytes / self.max_records_in_ram));
             }
         }
@@ -91,7 +102,7 @@ where
     /**
      * Sort the records in memory, write them to a file, and clear the buffer of records in memory.
      */
-    fn spill_to_disk(&mut self) -> Result<(), Error>{
+    fn spill_to_disk(&mut self) -> Result<(), Error> {
         self.ram_records.get_mut(0..self.num_records_in_ram).unwrap_or_else(|| {
             panic!("Code error. Failed to get slice of `ram_records` with index 0..self.num_records_in_ram.");
         }).sort();
@@ -100,16 +111,17 @@ where
 
         let mut buf_writer = BufWriter::new(f.as_file_mut());
 
-        self.ram_records.drain(..self.num_records_in_ram).map(|r| {
-            save_as_byte_to_file(&r, &mut buf_writer)
-        }).collect::<Result<(), Error>>()?;
+        self.ram_records
+            .drain(..self.num_records_in_ram)
+            .map(|r| save_as_byte_to_file(&r, &mut buf_writer))
+            .collect::<Result<(), Error>>()?;
 
         drop(buf_writer);
 
         self.num_records_in_ram = 0;
 
         self.files.push(f.into_temp_path());
-        
+
         Ok(())
     }
 
@@ -154,48 +166,43 @@ where
         self.iteration_started = true;
 
         if self.files.is_empty() {
-            Ok(self.in_memory_iter())
+            Ok(SortingCollectionIter::InMemoryIter(self.in_memory_iter()))
         } else {
-            Ok(MergingIterator::new(&self.files))
+            Ok(SortingCollectionIter::MergingIterator(
+                MergingIterator::new(&self.files),
+            ))
         }
     }
-    
-    
 
-    fn in_memory_iter(&mut self) -> std::slice::Iter<'_, T> {
+    fn in_memory_iter(&mut self) -> std::vec::Drain<'_, T> {
         self.ram_records.get_mut(0..self.num_records_in_ram).unwrap_or_else(|| {
             panic!("Code error. Failed to get slice of `ram_records` with index 0..self.num_records_in_ram.");
         }).sort();
 
-        self.ram_records.get(..self.num_records_in_ram).unwrap().iter()
-
+        self.ram_records.drain(..self.num_records_in_ram)
     }
 }
-
 
 pub(crate) enum SortingCollectionIter<'a, T>
 where
     T: for<'de> Deserialize<'de>,
 {
-    InMemoryIter(std::slice::Iter<'a, T>),
-    MergingIterator(MergingIterator<BufReader<File>, T>)
+    InMemoryIter(std::vec::Drain<'a, T>),
+    MergingIterator(MergingIterator<BufReader<File>, T>),
 }
 
 impl<'a, T> Iterator for SortingCollectionIter<'a, T>
 where
     T: for<'de> Deserialize<'de>,
-    PeekFileRecordIterator<BufReader<File>, T>: Ord
+    PeekFileRecordIterator<BufReader<File>, T>: Ord,
 {
-    type Item=&'a T;
+    type Item = T;
 
     fn next(&mut self) -> Option<Self::Item> {
-        todo!();
-
         match self {
             SortingCollectionIter::InMemoryIter(it) => it.next(),
-            SortingCollectionIter::MergingIterator(it) => it.next().as_ref(),
+            SortingCollectionIter::MergingIterator(it) => it.next(),
         }
-
     }
 }
 
@@ -207,26 +214,28 @@ struct FileRecordIterator<R, T> {
 }
 
 impl<R, T> FileRecordIterator<R, T> {
-    fn new(inner: R, ) -> Self {
-        Self { inner, buf:Vec::with_capacity(size_of::<T>()), phantom_data: PhantomData }
+    fn new(inner: R) -> Self {
+        Self {
+            inner,
+            buf: Vec::with_capacity(size_of::<T>()),
+            phantom_data: PhantomData,
+        }
     }
 }
 
-impl<T:for<'de> Deserialize<'de>, R:Read> Iterator for FileRecordIterator<R, T> {
-    type Item=T;
+impl<T: for<'de> Deserialize<'de>, R: Read> Iterator for FileRecordIterator<R, T> {
+    type Item = T;
 
     fn next(&mut self) -> Option<Self::Item> {
         let buf = &mut self.buf;
-        
+
         buf.clear();
 
         match self.inner.read_exact(buf) {
-            Ok(_) => {},
-            Err(err) => {
-                match err.kind() {
-                    std::io::ErrorKind::UnexpectedEof => return None,
-                    err => panic!("{:?}", err),
-                }
+            Ok(_) => {}
+            Err(err) => match err.kind() {
+                std::io::ErrorKind::UnexpectedEof => return None,
+                err => panic!("{:?}", err),
             },
         }
 
@@ -237,43 +246,60 @@ impl<T:for<'de> Deserialize<'de>, R:Read> Iterator for FileRecordIterator<R, T> 
     }
 }
 
-
-struct PeekFileRecordIterator<R, T> where
-T: for<'de> Deserialize<'de>,
-R: Read {
-    inner: Peekable<FileRecordIterator<R, T>>,
+struct PeekFileRecordIterator<R, T>
+where
+    T: for<'de> Deserialize<'de>,
+    R: Read,
+{
+    iter: FileRecordIterator<R, T>,
     n: i32,
+    peeked: Option<Option<T>>,
+}
+
+impl<R, T> Iterator for PeekFileRecordIterator<R, T>
+where
+    T: for<'de> Deserialize<'de>,
+    R: Read,
+{
+    type Item = T;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        let r = match self.peeked.take() {
+            Some(v) => v,
+            None => self.iter.next(),
+        };
+
+        self.peek(); // assure that self always has Some() in peeked field.
+
+        r
+    }
 }
 
 impl<R, T> PeekFileRecordIterator<R, T>
 where
-T: for<'de> Deserialize<'de>,
-R: Read
-{
-    fn new(inner: Peekable<FileRecordIterator<R, T>>, n: i32) -> Self {
-        Self { inner, n }
-    }
-}
-
-impl<R,T> Deref for PeekFileRecordIterator<R, T>
-where
     T: for<'de> Deserialize<'de>,
     R: Read,
 {
-    type Target=Peekable<FileRecordIterator<R, T>>;
+    fn new(iter: FileRecordIterator<R, T>, n: i32) -> Self {
+        let mut s = Self {
+            iter,
+            n,
+            peeked: None,
+        };
 
-    fn deref(&self) -> &Self::Target {
-        &self.inner
+        s.peek();
+
+        s
     }
-}
 
-impl<R,T> DerefMut for PeekFileRecordIterator<R, T>
-where
-    T: for<'de> Deserialize<'de>,
-    R: Read,
-{
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.inner
+    pub(crate) fn peek(&mut self) -> Option<&T> {
+        let iter = &mut self.iter;
+        self.peeked.get_or_insert_with(|| iter.next()).as_ref()
+    }
+
+    pub(crate) fn peeked(&self) -> Option<&T> {
+        self.peeked.as_ref().unwrap().as_ref()
     }
 }
 
@@ -283,25 +309,24 @@ where
     R: Read,
 {
     queue: BTreeSet<PeekFileRecordIterator<R, T>>,
-
 }
 
 impl<R, T> Ord for PeekFileRecordIterator<R, T>
 where
     T: for<'de> Deserialize<'de> + PartialEq + PartialOrd,
-    R: Read, 
+    R: Read,
 {
-        fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-            self.partial_cmp(other).unwrap() 
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.partial_cmp(other).unwrap()
     }
 }
 
 impl<R, T> Eq for PeekFileRecordIterator<R, T>
 where
     T: for<'de> Deserialize<'de> + PartialEq + PartialOrd,
-    R: Read, {
-        
-    }
+    R: Read,
+{
+}
 
 impl<R, T> PartialOrd for PeekFileRecordIterator<R, T>
 where
@@ -309,9 +334,9 @@ where
     R: Read,
 {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        match self.peek().partial_cmp(&other.peek()) {
-            Some(ord) => return Some(ord),
-            None => {},
+        match self.peeked().partial_cmp(&other.peeked()) {
+            Some(std::cmp::Ordering::Equal) => {}
+            ord => return ord,
         }
 
         self.n.partial_cmp(&other.n)
@@ -324,7 +349,7 @@ where
     R: Read,
 {
     fn eq(&self, other: &Self) -> bool {
-        self.peek() == other.peek()
+        self.peeked() == other.peeked()
     }
 }
 
@@ -332,41 +357,34 @@ impl<T> MergingIterator<BufReader<File>, T>
 where
     T: for<'de> Deserialize<'de> + Ord,
 {
-    pub(crate) fn new(file_paths:&[TempPath]) -> Self {
+    pub(crate) fn new(file_paths: &[TempPath]) -> Self {
         let mut queue = BTreeSet::new();
 
-        let mut n =0;
+        let mut n = 0;
         for f in file_paths {
-            let mut it = FileRecordIterator::new(BufReader::new(File::open(f).unwrap())).peekable();
+            let it = PeekFileRecordIterator::new(
+                FileRecordIterator::new(BufReader::new(File::open(f).unwrap())),
+                n,
+            );
 
-            if it.peek().is_some() {
-                queue.insert(
-                    
-                        PeekFileRecordIterator::new(
-                            it,
-                            n,
-                        )
-                    
-                );
-
-                n+=1;
+            if it.peeked().is_some() {
+                queue.insert(it);
             }
+
+            n += 1;
         }
 
-        Self {
-            queue,
-        }
+        Self { queue }
     }
 }
-
 
 impl<R, T> Iterator for MergingIterator<R, T>
 where
     PeekFileRecordIterator<R, T>: Ord,
     R: std::io::Read,
-    T: for<'de> serde::Deserialize<'de>
+    T: for<'de> serde::Deserialize<'de>,
 {
-    type Item=T;
+    type Item = T;
 
     fn next(&mut self) -> Option<Self::Item> {
         let mut file_iterator = match self.queue.pop_first() {
@@ -378,15 +396,11 @@ where
 
         if let Some(_) = file_iterator.peek() {
             self.queue.insert(file_iterator);
-        } 
-        
+        }
+
         Some(ret)
     }
 }
-
-
-
-
 
 #[cfg(test)]
 mod test {
@@ -394,7 +408,7 @@ mod test {
 
     use super::*;
 
-    struct A<T:?Sized> {
+    struct A<T: ?Sized> {
         m: T,
     }
 
@@ -414,11 +428,10 @@ mod test {
 
     #[test]
     fn mut_borrow() {
-        let mut b = B{s:"ASD".into()};
+        let mut b = B { s: "ASD".into() };
         let mut v = vec![];
-        let a = A {m: b.ref_mut()};
+        let a = A { m: b.ref_mut() };
 
         v.push(b.consume());
-        
     }
 }

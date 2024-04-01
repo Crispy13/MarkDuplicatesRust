@@ -39,9 +39,9 @@ impl SortOrder {
 
         Ok(v)
     }
-    
+
     pub(crate) fn from_header(h: &HeaderView) -> Result<Self, Error> {
-        let v =match h.header_map().get_sort_order() {
+        let v = match h.header_map().get_sort_order() {
             Some(s) => SortOrder::from_str(s)?,
             None => Err(anyhow!("Failed to get 'SO' value in sam file header."))?,
         };
@@ -49,9 +49,6 @@ impl SortOrder {
         Ok(v)
     }
 }
-
-
-
 
 #[cfg(test)]
 mod test {
@@ -105,8 +102,5 @@ mod test {
 
             break;
         }
-        
-
-
     }
 }

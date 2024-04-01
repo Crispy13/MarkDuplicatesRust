@@ -60,10 +60,13 @@ impl UmiUtil {
         }
 
         match Self::get_strand(rec)? {
-            ReadStrand::BOTTOM => {
-                Ok(format!("{}{}{}", split.get(1).unwrap(), Self::DUPLEX_UMI_DELIMITER, split.get(0).unwrap()))
-            }
-            _ => Ok(umi.to_string())
+            ReadStrand::BOTTOM => Ok(format!(
+                "{}{}{}",
+                split.get(1).unwrap(),
+                Self::DUPLEX_UMI_DELIMITER,
+                split.get(0).unwrap()
+            )),
+            _ => Ok(umi.to_string()),
         }
     }
 
@@ -80,7 +83,7 @@ impl UmiUtil {
      */
     fn get_strand(rec: &Record) -> Result<ReadStrand, Error> {
         if rec.is_unmapped() || rec.is_mate_unmapped() {
-            return Ok(ReadStrand::UNKNOWN)
+            return Ok(ReadStrand::UNKNOWN);
         }
 
         // If the read pair are aligned to different contigs we use

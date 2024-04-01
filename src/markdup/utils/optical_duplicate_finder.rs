@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 
-use super::{physical_location::PhysicalLocation, read_name_parser::{impl_read_name_parser_ext, ReadNameParser, ReadNameParserExt}};
+use super::{
+    physical_location::PhysicalLocation,
+    read_name_parser::{impl_read_name_parser_ext, ReadNameParser, ReadNameParserExt},
+};
 use regex::Regex;
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
@@ -34,4 +37,3 @@ impl OpticalDuplicateFinder {
 impl ReadNameParserExt for OpticalDuplicateFinder {
     impl_read_name_parser_ext!(self, self.rnp);
 }
-

@@ -326,9 +326,18 @@ mod read_name_parser_test {
             assert_eq!(ReadNameParser::rapid_parse_i32(&i_string).unwrap(), i);
 
             // trailing characters
-            assert_eq!(ReadNameParser::rapid_parse_i32(&format!("{}A", i_string)).unwrap(), i);
-            assert_eq!(ReadNameParser::rapid_parse_i32(&format!("{}ACGT", i_string)).unwrap(), i);
-            assert_eq!(ReadNameParser::rapid_parse_i32(&format!("{}.1", i_string)).unwrap(), i);
+            assert_eq!(
+                ReadNameParser::rapid_parse_i32(&format!("{}A", i_string)).unwrap(),
+                i
+            );
+            assert_eq!(
+                ReadNameParser::rapid_parse_i32(&format!("{}ACGT", i_string)).unwrap(),
+                i
+            );
+            assert_eq!(
+                ReadNameParser::rapid_parse_i32(&format!("{}.1", i_string)).unwrap(),
+                i
+            );
         }
     }
 

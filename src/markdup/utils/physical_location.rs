@@ -10,7 +10,7 @@ pub(crate) trait PhysicalLocation: Serialize {
 
     fn get_read_group(&self) -> i16;
 
-    fn set_read_group(&mut self, read_group:i16);
+    fn set_read_group(&mut self, read_group: i16);
 
     fn get_tile(&self) -> i16;
 
@@ -33,14 +33,13 @@ pub(crate) trait PhysicalLocation: Serialize {
         self.get_tile() as i32 != Self::NO_VALUE
     }
 
-    // fn eq(&self, other: &Self) -> bool 
+    // fn eq(&self, other: &Self) -> bool
     // where
     //     Self: Sized + PartialEq,
     // {
     //     self == other
     // }
 }
-
 
 /**
  * Small class that provides access to the physical location information about a cluster.
@@ -72,7 +71,6 @@ macro_rules! impl_default_for_physical_loc {
 
 impl_default_for_physical_loc!(PhysicalLocationInt);
 
-
 macro_rules! impl_physical_location_unimpl {
     ($self:ident, $pl:expr, $xyt:ty) => {
         fn get_read_group(&$self) -> i16 {
@@ -92,7 +90,6 @@ macro_rules! impl_physical_location_unimpl {
         }
     }
 }
-
 
 macro_rules! impl_physical_location_core {
     ($self:ident, $pl:expr, $xyt:ty) => {
@@ -120,7 +117,7 @@ macro_rules! impl_physical_location_core {
             $pl.y = y;
         }
 
-        
+
     };
 }
 
@@ -131,7 +128,7 @@ impl PhysicalLocation for PhysicalLocationInt {
     impl_physical_location_unimpl!(self, self, i32);
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, PartialEq)]
 pub(crate) struct PhysicalLocationShort {
     pub(crate) tile: i16,
     pub(crate) x: i32,

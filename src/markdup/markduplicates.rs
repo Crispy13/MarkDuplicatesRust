@@ -8,7 +8,10 @@ use rust_htslib::bam::{
 
 use crate::{
     cmdline::cli::Cli,
-    hts::{duplicate_scoring_strategy::DuplicateScoringStrategy, SAMTag, SortOrder},
+    hts::{
+        duplicate_scoring_strategy::DuplicateScoringStrategy,
+        utils::sorting_collection::SortingCollection, SAMTag, SortOrder,
+    },
     markdup::{
         estimate_library_complexity::EstimateLibraryComplexity,
         umi_utils::UmiUtil,
@@ -40,13 +43,13 @@ pub(crate) struct MarkDuplicates {
     optical_duplicate_finder: OpticalDuplicateFinder,
     cli: Cli,
 
-    frag_sort: Vec<ReadEndsForMarkDuplicates>,
-    pair_sort: Vec<ReadEndsForMarkDuplicates>,
+    frag_sort: SortingCollection<ReadEndsForMarkDuplicates>,
+    pair_sort: SortingCollection<ReadEndsForMarkDuplicates>,
 }
 
 impl MarkDuplicates {
     #[allow(non_upper_case_globals)]
-    const log:&'static str = stringify!(MarkDuplicates);
+    const log: &'static str = stringify!(MarkDuplicates);
     const NO_SUCH_INDEX: i64 = i64::MAX;
 
     fn build_sorted_read_end_vecs(&mut self, use_barcodes: bool) -> Result<(), Error> {
@@ -157,7 +160,7 @@ impl MarkDuplicates {
                         // a copy since pairedEnds will be modified when the mate comes along.
                         paired_ends = fragment_end.clone();
 
-                        self.frag_sort.push(fragment_end);
+                        self.frag_sort.add(fragment_end);
 
                         tmp.put(
                             paired_ends.read_ends.read2_reference_index,
@@ -170,7 +173,7 @@ impl MarkDuplicates {
                         let mates_ref_index = fragment_end.read_ends.read1_reference_index;
                         let mates_coordinate = fragment_end.read_ends.read1_coordinate;
 
-                        self.frag_sort.push(fragment_end);
+                        self.frag_sort.add(fragment_end);
 
                         // Set orientationForOpticalDuplicates, which always goes by the first then the second end for the strands.  NB: must do this
                         // before updating the orientation later.
@@ -240,20 +243,18 @@ impl MarkDuplicates {
                         }
 
                         paired_ends.score += self.get_read_duplicate_score(&rec, &paired_ends);
-                        self.pair_sort.push(paired_ends);
+                        self.pair_sort.add(paired_ends);
                     }
                 }
             }
 
             // Print out some stats every 1m reads
-            index+=1;
+            index += 1;
             if progress.record(&rec) {
-                log::info!(target: Self::log, 
+                log::info!(target: Self::log,
                     "Tracking {} as yet unmatched pairs. {} records in RAM.", tmp.size(), tmp.size_in_ram(),
                 );
             }
-            
-
         }
 
         log::info!(target: Self::log, "Read {} records. {} pairs never matched.", index, tmp.size());
@@ -391,7 +392,8 @@ impl MarkDuplicates {
             rec,
             self.cli.DUPLICATE_SCORING_STRATEGY,
             false,
-        ).unwrap() // we can use unwrap() with assume_mate_cigar = false;
+        )
+        .unwrap() // we can use unwrap() with assume_mate_cigar = false;
     }
 }
 
