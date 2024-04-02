@@ -4,6 +4,7 @@ use crate::hts::duplicate_scoring_strategy::ScoringStrategy;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
+#[allow(non_snake_case)]
 pub(crate) struct Cli {
     /// The program record ID for the @PG record(s) created by this program. Set to null to disable
     /// PG record creation.  This string may have a suffix appended to avoid collision with other
@@ -71,4 +72,24 @@ pub(crate) struct Cli {
     /// One or more input SAM, BAM or CRAM files to analyze. Must be coordinate sorted.
     #[arg(long = "INPUT", value_name = "String")]
     pub(crate) INPUT: Vec<String>,
+
+    /// enable parameters and behavior specific to flow based reads.
+    #[arg(long = "FLOW_MODE", value_name = "bool", default_value_t=false)]
+    pub(crate) FLOW_MODE: bool,
+
+    /// Use position of the clipping as the end position, when considering duplicates (or use the unclipped end position) 
+    /// (for this argument, \"read end\" means 3' end).
+    #[arg(long = "USE_UNPAIRED_CLIPPED_END", value_name = "bool", default_value_t=false)]
+    pub(crate) USE_UNPAIRED_CLIPPED_END: bool,
+
+    /// Skip first N flows, starting from the read's start, when considering duplicates. Useful for flow based reads where sometimes there 
+    /// is noise in the first flows 
+    /// (for this argument, \"read start\" means 5' end).
+    #[arg(long = "FLOW_SKIP_FIRST_N_FLOWS", value_name = "i32", default_value_t=0)]
+    pub(crate) FLOW_SKIP_FIRST_N_FLOWS: i32,
+
+    /// Treat position of read trimming based on quality as the known end (relevant for flow based reads). Default false - if the read 
+    /// is trimmed on quality its end is not defined and the read is duplicate of any read starting at the same place.
+    #[arg(long = "FLOW_Q_IS_KNOWN_END", value_name = "bool", default_value_t=false)]
+    pub(crate) FLOW_Q_IS_KNOWN_END: bool,
 }

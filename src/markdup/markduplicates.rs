@@ -38,10 +38,10 @@ use super::utils::{
 use anyhow::{anyhow, Error};
 
 pub(crate) struct MarkDuplicates {
-    pg_ids_seen: HashSet<String>,
-    library_id_generator: LibraryIdGenerator,
-    optical_duplicate_finder: OpticalDuplicateFinder,
-    cli: Cli,
+    pub(super) pg_ids_seen: HashSet<String>,
+    pub(super) library_id_generator: LibraryIdGenerator,
+    pub(super) optical_duplicate_finder: OpticalDuplicateFinder,
+    pub(super) cli: Cli,
 
     frag_sort: SortingCollection<ReadEndsForMarkDuplicates>,
     pair_sort: SortingCollection<ReadEndsForMarkDuplicates>,
@@ -160,7 +160,7 @@ impl MarkDuplicates {
                         // a copy since pairedEnds will be modified when the mate comes along.
                         paired_ends = fragment_end.clone();
 
-                        self.frag_sort.add(fragment_end);
+                        self.frag_sort.add(fragment_end)?;
 
                         tmp.put(
                             paired_ends.read_ends.read2_reference_index,
@@ -173,7 +173,7 @@ impl MarkDuplicates {
                         let mates_ref_index = fragment_end.read_ends.read1_reference_index;
                         let mates_coordinate = fragment_end.read_ends.read1_coordinate;
 
-                        self.frag_sort.add(fragment_end);
+                        self.frag_sort.add(fragment_end)?;
 
                         // Set orientationForOpticalDuplicates, which always goes by the first then the second end for the strands.  NB: must do this
                         // before updating the orientation later.
@@ -243,7 +243,7 @@ impl MarkDuplicates {
                         }
 
                         paired_ends.score += self.get_read_duplicate_score(&rec, &paired_ends);
-                        self.pair_sort.add(paired_ends);
+                        self.pair_sort.add(paired_ends)?;
                     }
                 }
             }
@@ -260,117 +260,19 @@ impl MarkDuplicates {
         log::info!(target: Self::log, "Read {} records. {} pairs never matched.", index, tmp.size());
 
         // Tell these collections to free up memory if possible.
+        self.pair_sort.done_adding()?;
+        self.frag_sort.done_adding()?;
 
-        todo!()
+        Ok(())
     }
 
-    /**
-     * Builds a read ends object that represents a single read.
-     */
-    fn build_read_ends(
-        &mut self,
-        header: &HeaderView,
-        index: i64,
-        rec: &Record,
-        use_barcode: bool,
-    ) -> Result<ReadEndsForMarkDuplicates, Error> {
-        let mut read_ends = ReadEnds::default();
+    
 
-        read_ends.read1_reference_index = rec.tid();
-        read_ends.read1_coordinate = if rec.is_reverse() {
-            rec.reference_end() as i32
-        } else {
-            rec.reference_start() as i32
-        };
-
-        read_ends.orientation = if rec.is_reverse() {
-            ReadEnds::R
-        } else {
-            ReadEnds::F
-        };
-
-        let read1_index_in_file = index;
-        let score = DuplicateScoringStrategy::compute_duplicate_score(
-            rec,
-            self.cli.DUPLICATE_SCORING_STRATEGY,
-            false,
-        )
-        .unwrap(); // we can assure that no error occurs when `assume_mate_cigar=false`.
-
-        // Doing this lets the ends object know that it's part of a pair
-        if rec.is_paired() && !rec.is_mate_unmapped() {
-            read_ends.read2_reference_index = rec.mtid()
-        }
-
-        // Fill in the library ID
-        read_ends.library_id = self.library_id_generator.get_library_id(rec)?;
-
-        // Fill in the location information for optical duplicates
-        if self.optical_duplicate_finder.add_location_information(
-            std::str::from_utf8(rec.qname())?.to_string(),
-            &mut read_ends,
-        ) {
-            // calculate the RG number (nth in list)
-            read_ends.read_group = 0;
-
-            let rg = rec
-                .aux(b"RG")
-                .or_else(|err| Err(Error::from(err)))
-                .and_then(|aux| match aux {
-                    Aux::String(v) => Ok(v),
-                    _ => Err(anyhow!("Invalid type for RG tag")),
-                });
-            let read_groups = header.get_read_groups();
-
-            if let (Ok(rg), Ok(read_groups)) = (rg, read_groups) {
-                for read_group in read_groups {
-                    if read_group.get_read_group_id().eq(rg) {
-                        break;
-                    } else {
-                        read_ends.read_group += 1;
-                    }
-                }
-            }
-        }
-
-        let mut read_ends_for_md = ReadEndsForMarkDuplicates {
-            score,
-            read1_index_in_file,
-            read_ends,
-            ..Default::default()
-        };
-
-        if use_barcode {
-            let top_strand_normalized_umi = UmiUtil::get_top_strand_normalized_umi(
-                rec,
-                &self.cli.BARCODE_TAG,
-                self.cli.DUPLEX_UMI,
-            )?;
-
-            let barcode = hash_code(top_strand_normalized_umi);
-
-            let mut barcode_data = ReadEndsBarcodeData {
-                barcode,
-                ..Default::default()
-            };
-
-            if (!rec.is_paired() || rec.is_first_in_template()) {
-                barcode_data.read_one_barcode = self.get_read_one_barcode_value(rec);
-            } else {
-                barcode_data.read_two_barcode = self.get_read_two_barcode_value(rec);
-            }
-
-            read_ends_for_md.barcode_data = Some(barcode_data);
-        }
-
-        Ok(read_ends_for_md)
-    }
-
-    fn get_read_one_barcode_value(&self, rec: &Record) -> u64 {
+    pub(super) fn get_read_one_barcode_value(&self, rec: &Record) -> u64 {
         EstimateLibraryComplexity::get_read_barcode_value(rec, &self.cli.READ_ONE_BARCODE_TAG)
     }
 
-    fn get_read_two_barcode_value(&self, rec: &Record) -> u64 {
+    pub(super) fn get_read_two_barcode_value(&self, rec: &Record) -> u64 {
         EstimateLibraryComplexity::get_read_barcode_value(rec, &self.cli.READ_TWO_BARCODE_TAG)
     }
 
@@ -394,6 +296,17 @@ impl MarkDuplicates {
             false,
         )
         .unwrap() // we can use unwrap() with assume_mate_cigar = false;
+    }
+
+    fn do_work(&mut self) {
+        let use_barcodes = !self.cli.BARCODE_TAG.is_empty()
+            || !self.cli.READ_ONE_BARCODE_TAG.is_empty()
+            || !self.cli.READ_TWO_BARCODE_TAG.is_empty();
+
+        // use flow based calculation helper?
+        if self.cli.FLOW_MODE {
+
+        }
     }
 }
 
