@@ -186,8 +186,8 @@ pub(crate) fn human_readable_byte_count(bytes: usize) -> String {
 
 #[cfg(test)]
 mod test {
-    #[global_allocator]
-    static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
+    // #[global_allocator]
+    // static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
     use std::hash::DefaultHasher;
 

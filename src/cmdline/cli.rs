@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use clap::{ArgAction, Args, Parser, Subcommand};
 
 use crate::hts::duplicate_scoring_strategy::ScoringStrategy;
@@ -92,4 +94,37 @@ pub(crate) struct Cli {
     /// is trimmed on quality its end is not defined and the read is duplicate of any read starting at the same place.
     #[arg(long = "FLOW_Q_IS_KNOWN_END", value_name = "bool", default_value_t=false)]
     pub(crate) FLOW_Q_IS_KNOWN_END: bool,
+
+    /// Use specific quality summing strategy for flow based reads. The strategy ensures that the same 
+    /// (and correct) quality value is used for all bases of the same homopolymer.
+    #[arg(long = "FLOW_QUALITY_SUM_STRATEGY", value_name = "bool", default_value_t=false)]
+    pub(crate) FLOW_QUALITY_SUM_STRATEGY: bool,
+
+    /// Threshold for considering a quality value high enough to be included when calculating FLOW_QUALITY_SUM_STRATEGY calculation.
+    #[arg(long = "FLOW_EFFECTIVE_QUALITY_THRESHOLD", value_name = "i32", default_value_t=15)]
+    pub(crate) FLOW_EFFECTIVE_QUALITY_THRESHOLD: i32,
+
+    /// Maximal difference of the read end position that counted as equal. Useful for flow based 
+    /// reads where the end position might vary due to sequencing errors. 
+    /// (for this argument, \"read end\" means 3' end)
+    #[arg(long = "UNPAIRED_END_UNCERTAINTY", value_name = "i32", default_value_t=0)]
+    pub(crate) UNPAIRED_END_UNCERTAINTY: i32,
+
+    /// Make the end location of single end read be significant when considering duplicates, 
+    /// in addition to the start location, which is always significant (i.e. require single-ended reads to start and
+    /// end on the same position to be considered duplicate) 
+    /// (for this argument, \"read end\" means 3' end).
+    #[arg(long = "USE_END_IN_UNPAIRED_READS", value_name = "bool", default_value_t=false)]
+    pub(crate) USE_END_IN_UNPAIRED_READS: bool,
+
+    /// This number, plus the maximum RAM available to the JVM, determine the memory footprint used by 
+    /// some of the sorting collections.  If you are running out of memory, try reducing this number.
+    #[arg(long = "SORTING_COLLECTION_SIZE_RATIO", value_name = "f64", default_value_t=0.25)]
+    pub(crate) SORTING_COLLECTION_SIZE_RATIO: f64,
+
+    /// One or more directories with space available to be used by this program for temporary storage of working files
+    #[arg(long = "TMP_DIR", value_name = "Vec<PathBuf>", default_value="")]
+    pub(crate) TMP_DIR: Vec<PathBuf>,
+
+
 }

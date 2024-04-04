@@ -61,6 +61,34 @@ impl<T> SortingCollection<T>
 where
     T: Ord + Serialize + for<'de> Deserialize<'de>,
 {
+    pub(crate) fn new(
+        max_records_in_ram: usize,
+        print_record_size_sampling: bool,
+        tmp_dirs: Vec<PathBuf>,
+    ) -> Self {
+        if max_records_in_ram <= 0 {
+            panic!("maxRecordsInRam must be > 0");
+        }
+
+        if tmp_dirs.is_empty() {
+            panic!("At least one temp directory must be provided.");
+        }
+
+        let ram_records = Vec::with_capacity(max_records_in_ram);
+
+        Self {
+            tmp_dirs,
+            ram_records,
+            done_adding:false,
+            iteration_started:false,
+            num_records_in_ram:0,
+            max_records_in_ram,
+            print_record_size_sampling,
+            files:Vec::new(),
+            cleaned_up:false,
+        }
+    }
+
     #[allow(non_upper_case_globals)]
     const log: &'static str = stringify!(SortingCollection);
 

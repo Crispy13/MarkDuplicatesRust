@@ -28,10 +28,13 @@ use crate::{
     utils::{hash_code, logging::ProgressLogger, CommonHasher},
 };
 
-use super::utils::{
-    optical_duplicate_finder::OpticalDuplicateFinder, physical_location::PhysicalLocation,
-    read_ends_for_mark_duplicates::ReadEndsForMarkDuplicates,
-    read_ends_for_mark_duplicates_with_barcodes::ReadEndsBarcodeData,
+use super::{
+    markduplicates_helper::MarkDuplicatesHelper,
+    utils::{
+        optical_duplicate_finder::OpticalDuplicateFinder, physical_location::PhysicalLocation,
+        read_ends_for_mark_duplicates::ReadEndsForMarkDuplicates,
+        read_ends_for_mark_duplicates_with_barcodes::ReadEndsBarcodeData,
+    },
 };
 
 // type Error = Box<dyn std::error::Error + Send + Sync>;
@@ -43,14 +46,52 @@ pub(crate) struct MarkDuplicates {
     pub(super) optical_duplicate_finder: OpticalDuplicateFinder,
     pub(super) cli: Cli,
 
+    calc_helper: MarkDuplicatesHelper,
+
     frag_sort: SortingCollection<ReadEndsForMarkDuplicates>,
     pair_sort: SortingCollection<ReadEndsForMarkDuplicates>,
 }
 
 impl MarkDuplicates {
+    pub(crate) fn new(
+        cli: Cli,
+    ) -> Self {
+        const size_in_bytes: usize = size_of::<ReadEndsForMarkDuplicates>();
+        let max_in_memory = ((24 * 10_usize.pow(9)) as f64 * cli.SORTING_COLLECTION_SIZE_RATIO
+            / size_in_bytes as f64) as usize;
+        let tmp_dir = cli.TMP_DIR.clone();
+
+        Self {
+            pg_ids_seen: HashSet::new(),
+            library_id_generator: LibraryIdGenerator::new(),
+            optical_duplicate_finder: OpticalDuplicateFinder::default(),
+            cli,
+            calc_helper: MarkDuplicatesHelper::MarkDuplicatesHelper,
+            frag_sort: SortingCollection::new(max_in_memory, false, tmp_dir.clone()),
+            pair_sort: SortingCollection::new(max_in_memory, false, tmp_dir),
+        }
+    }
+
     #[allow(non_upper_case_globals)]
     const log: &'static str = stringify!(MarkDuplicates);
     const NO_SUCH_INDEX: i64 = i64::MAX;
+
+    pub(super) fn build_read_ends(
+        &mut self,
+        header: &HeaderView,
+        index: i64,
+        rec: &Record,
+        use_barcode: bool,
+    ) -> Result<ReadEndsForMarkDuplicates, Error> {
+        match self.calc_helper {
+            MarkDuplicatesHelper::MarkDuplicatesHelper => {
+                MarkDuplicatesHelper::build_read_ends_normal(self, header, index, rec, use_barcode)
+            }
+            MarkDuplicatesHelper::MarkDuplicatesForFlowHelper => {
+                MarkDuplicatesHelper::build_read_ends_for_flow(self, header, index, rec, use_barcode)
+            }
+        }
+    }
 
     fn build_sorted_read_end_vecs(&mut self, use_barcodes: bool) -> Result<(), Error> {
         let mut indexed_reader = self.open_inputs()?;
@@ -266,8 +307,6 @@ impl MarkDuplicates {
         Ok(())
     }
 
-    
-
     pub(super) fn get_read_one_barcode_value(&self, rec: &Record) -> u64 {
         EstimateLibraryComplexity::get_read_barcode_value(rec, &self.cli.READ_ONE_BARCODE_TAG)
     }
@@ -298,15 +337,27 @@ impl MarkDuplicates {
         .unwrap() // we can use unwrap() with assume_mate_cigar = false;
     }
 
-    fn do_work(&mut self) {
+    /**
+     * Main work method.  Reads the SAM file once and collects sorted information about
+     * the 5' ends of both ends of each read (or just one end in the case of pairs).
+     * Then makes a pass through those determining duplicates before re-reading the
+     * input file and writing it out with duplication flags set correctly.
+     */
+    pub(crate) fn do_work(&mut self) {
         let use_barcodes = !self.cli.BARCODE_TAG.is_empty()
             || !self.cli.READ_ONE_BARCODE_TAG.is_empty()
             || !self.cli.READ_TWO_BARCODE_TAG.is_empty();
 
         // use flow based calculation helper?
         if self.cli.FLOW_MODE {
-
+            self.calc_helper = MarkDuplicatesHelper::MarkDuplicatesForFlowHelper;
+            MarkDuplicatesHelper::validate_flow_parameters(&self);
         }
+
+        log::info!(target: Self::log, "Reading input file and constructing read end information.");
+        self.build_sorted_read_end_vecs(use_barcodes);
+
+        todo!()
     }
 }
 

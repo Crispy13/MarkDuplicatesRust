@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use rust_htslib::bam::{record::RecordExt, HeaderView, Record};
+use rust_htslib::bam::{record::{RecordExt, SAMReadGroupRecord}, HeaderView, Record};
 
 // type Error = Box<dyn std::error::Error + Send + Sync>;
 use anyhow::Error;
@@ -11,6 +11,17 @@ pub(crate) struct LibraryIdGenerator {
 
 impl LibraryIdGenerator {
     const UNKNOWN_LIBRARY: &'static str = "Unknown Library";
+
+    pub(crate) fn new() -> Self {
+        Self {
+            library_ids:HashMap::new(),
+            next_library_id:1,
+        }
+    }
+
+    pub(crate) fn get_read_group_libary_name<'m>(read_group: &SAMReadGroupRecord<'m>) -> &'m str {
+        read_group.get_library().unwrap_or(Self::UNKNOWN_LIBRARY)
+    }
 
     /** Get the library ID for the given SAM record. */
     pub(crate) fn get_library_id(&mut self, rec: &Record) -> Result<i16, Error> {

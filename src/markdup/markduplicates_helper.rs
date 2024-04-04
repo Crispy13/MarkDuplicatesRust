@@ -30,10 +30,20 @@ impl MarkDuplicatesHelper {
 
     const END_INSIGNIFICANT_VALUE: i32 = 0;
 
+    const ATTR_DUPLICATE_SCORE: &'static str = "ForFlowDuplicateScore";
+
+    pub(super) fn validate_flow_parameters(md: &MarkDuplicates) {
+        if md.cli.UNPAIRED_END_UNCERTAINTY != 0 && !md.cli.USE_END_IN_UNPAIRED_READS {
+            panic!("Invalid parameter combination. UNPAIRED_END_UNCERTAINTY can not be specified when USE_END_IN_UNPAIRED_READS not specified");
+        }
+    }
+
+    
+
     /**
      * Builds a read ends object that represents a single read.
      */
-    fn build_read_ends_normal(
+    pub(super) fn build_read_ends_normal(
         md: &mut MarkDuplicates,
         header: &HeaderView,
         index: i64,
@@ -135,7 +145,7 @@ impl MarkDuplicatesHelper {
     /**
      * Builds a read ends object that represents a single read - for flow based read
      */
-    fn build_read_ends_for_flow(
+    pub(super) fn build_read_ends_for_flow(
         md: &mut MarkDuplicates,
         header: &HeaderView,
         index: i64,
@@ -156,7 +166,18 @@ impl MarkDuplicatesHelper {
         ends.read_ends.read1_coordinate =
             Self::get_read_end_coordinate(rec, !rec.is_reverse(), true, &md.cli);
 
-        todo!()
+        if md.cli.USE_UNPAIRED_CLIPPED_END {
+            ends.read_ends.read2_coordinate =
+                Self::get_read_end_coordinate(rec, rec.is_reverse(), false, &md.cli);
+        }
+
+        // adjust score
+        if md.cli.FLOW_QUALITY_SUM_STRATEGY {
+            ends.score =
+                Self::compute_flow_duplicate_score(md, rec, ends.read_ends.read2_coordinate);
+        }
+
+        Ok(ends)
     }
 
     fn get_read_end_coordinate(
@@ -301,6 +322,75 @@ impl MarkDuplicatesHelper {
     fn is_quality_clipped(rec: &Record) -> bool {
         Self::clipping_tag_contains_any(rec, &Self::CLIPPING_TAG_CONTAINS_QZ)
     }
+
+    fn compute_flow_duplicate_score(md: &MarkDuplicates, rec: &Record, end: i32) -> i16 {
+        if end == Self::END_INSIGNIFICANT_VALUE {
+            return -1;
+        }
+
+        // cached attribute not implemented yet.
+        // java code search there is cached attribute first if then get it.
+        // To do it in Rust, each record object must not removed or replaced on every read() function, but it is.
+        // For now, ignore the part loading cached attribute. Just make it every time this method is called.
+
+        let mut score = 0_i16;
+        score +=
+            (Self::get_flow_sum_of_base_qualities(rec, md.cli.FLOW_EFFECTIVE_QUALITY_THRESHOLD)
+                as i16)
+                .min(i16::MAX / 2);
+
+        score += if rec.is_quality_check_failed() {
+            i16::MIN / 2
+        } else {
+            0
+        };
+
+        score
+    }
+
+    fn get_flow_sum_of_base_qualities(rec: &Record, threshold: i32) -> i32 {
+        let mut score = 0;
+
+        // access qualities and bases
+        let quals = rec.qual();
+        let bases = rec.seq().encoded;
+
+        // create iteration range and direction
+        let starting_offset = if !rec.is_reverse() { 0 } else { bases.len() };
+
+        let end_offset = if !rec.is_reverse() { bases.len() } else { 0 };
+
+        let iter_incr = if !rec.is_reverse() {
+            |x: &mut usize| *x += 1
+        } else {
+            |x: &mut usize| *x -= 1
+        };
+
+        // loop on bases, extract qual related to homopolymer from start of homopolymer
+        let mut last_base = 0;
+        let mut effective_qual = 0;
+
+        let mut i = starting_offset;
+
+        let threshold = threshold as u8;
+        while {
+            iter_incr(&mut i);
+            i != end_offset
+        } {
+            let base = bases[i];
+            if base != last_base {
+                effective_qual = quals[i];
+            }
+
+            if effective_qual >= threshold {
+                score += effective_qual;
+            }
+
+            last_base = base;
+        }
+
+        score as i32
+    }
 }
 
 struct FlowOrder {
@@ -322,7 +412,8 @@ impl FlowOrder {
         }
 
         // fallback on finding a flow order elsewhere
-        let header_map = rec.header().unwrap().header_map();
+        let header = rec.header().unwrap();
+        let header_map = header.header_map();
         if let Some(rgs) = header_map.get_read_groups() {
             for rg in rgs {
                 if let Some(fo) = rg.get_flow_order() {
