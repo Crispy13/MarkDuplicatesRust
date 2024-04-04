@@ -33,6 +33,7 @@ pub(crate) struct Cli {
     #[arg(
         long = "DUPLICATE_SCORING_STRATEGY",
         value_name = "ScoringStrategy",
+        value_enum,
         default_value_t = ScoringStrategy::TOTAL_MAPPED_REFERENCE_LENGTH,
     )]
     pub(crate) DUPLICATE_SCORING_STRATEGY: ScoringStrategy,
@@ -72,7 +73,7 @@ pub(crate) struct Cli {
     pub(crate) READ_TWO_BARCODE_TAG: String,
 
     /// One or more input SAM, BAM or CRAM files to analyze. Must be coordinate sorted.
-    #[arg(long = "INPUT", value_name = "String")]
+    #[arg(long = "INPUT", value_name = "String", required=true)]
     pub(crate) INPUT: Vec<String>,
 
     /// enable parameters and behavior specific to flow based reads.
@@ -123,7 +124,7 @@ pub(crate) struct Cli {
     pub(crate) SORTING_COLLECTION_SIZE_RATIO: f64,
 
     /// One or more directories with space available to be used by this program for temporary storage of working files
-    #[arg(long = "TMP_DIR", value_name = "Vec<PathBuf>", default_value="")]
+    #[arg(long = "TMP_DIR", value_name = "Vec<PathBuf>", default_value="[]")]
     pub(crate) TMP_DIR: Vec<PathBuf>,
 
 

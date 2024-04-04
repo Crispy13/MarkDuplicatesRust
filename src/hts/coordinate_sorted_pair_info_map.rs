@@ -48,7 +48,14 @@ where
     ) -> Result<Self, Error> {
         let work_dir = PathBuf::from_str("CSPI.tmp")?;
 
-        create_dir(&work_dir)?;
+        match create_dir(&work_dir) {
+            Ok(_) => {},
+            Err(err) => if err.kind() == std::io::ErrorKind::AlreadyExists {
+                {}
+            } else {
+                Err(err)?
+            },
+        }
 
         Ok(Self {
             work_dir,
@@ -123,10 +130,13 @@ where
     }
 
     fn get_output_stream_for_sequence(&mut self, mate_sequence_index: i32) -> Result<File, Error> {
+        let path = self.make_file_for_sequence(mate_sequence_index)?;
+
         Ok(OpenOptions::new()
             .write(true)
             .append(true)
-            .open(self.make_file_for_sequence(mate_sequence_index)?)?)
+            .create(true)
+            .open(&path).or_else(|err| Err(anyhow!("err={:?}, path={:?}", err, path)))?)
     }
 
     fn ensure_sequence_loaded(&mut self, sequence_index: i32) -> Result<(), Error> {
@@ -242,7 +252,7 @@ where
             }
         }
 
-        todo!()
+        Ok(())
     }
 }
 

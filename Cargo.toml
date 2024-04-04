@@ -19,3 +19,7 @@ tempfile = "3.10.1"
 thiserror = "1.0.58"
 tikv-jemalloc-ctl = "0.5.4"
 tikv-jemallocator = "0.5.4"
+
+[profile.release]
+codegen-units=1
+lto=true

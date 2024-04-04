@@ -30,6 +30,7 @@ impl DuplicateScoringStrategy {
     fn new() {}
 
     fn hasher() -> &'static Murmur3 {
+        #[allow(non_upper_case_globals)]
         static murmur3: OnceLock<Murmur3> = OnceLock::new();
         murmur3.get_or_init(|| Murmur3::new(1))
     }

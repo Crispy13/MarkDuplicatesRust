@@ -355,7 +355,7 @@ impl MarkDuplicates {
         }
 
         log::info!(target: Self::log, "Reading input file and constructing read end information.");
-        self.build_sorted_read_end_vecs(use_barcodes);
+        self.build_sorted_read_end_vecs(use_barcodes).unwrap();
 
         todo!()
     }

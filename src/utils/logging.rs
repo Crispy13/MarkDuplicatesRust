@@ -214,7 +214,7 @@ impl ProgressLogger {
         const level: &str = "info";
         macro_rules! do_log {
             ($level:tt) => {
-                log::$level!(target: self.log, "chr={} pos={} {} {}.", chrom, pos, self.noun, self.verb);
+                log::$level!(target: self.log, "chr={} pos={} {} {}.", chrom, pos, self.noun, self.verb)
             };
         }
 
