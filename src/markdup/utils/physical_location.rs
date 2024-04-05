@@ -128,7 +128,7 @@ impl PhysicalLocation for PhysicalLocationInt {
     impl_physical_location_unimpl!(self, self, i32);
 }
 
-#[derive(Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 pub(crate) struct PhysicalLocationShort {
     pub(crate) tile: i16,
     pub(crate) x: i32,

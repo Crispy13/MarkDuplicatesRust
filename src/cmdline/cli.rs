@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use clap::{ArgAction, Args, Parser, Subcommand};
+use log::LevelFilter;
 
 use crate::hts::duplicate_scoring_strategy::ScoringStrategy;
 
@@ -126,6 +127,10 @@ pub(crate) struct Cli {
     /// One or more directories with space available to be used by this program for temporary storage of working files
     #[arg(long = "TMP_DIR", value_name = "Vec<PathBuf>", default_value="[]")]
     pub(crate) TMP_DIR: Vec<PathBuf>,
+
+    /// Logging level.
+    #[arg(long = "LOGGING_LEVEL", value_name = "LevelFilter", default_value_t=LevelFilter::Info)]
+    pub(crate) LOGGING_LEVEL: LevelFilter,
 
 
 }

@@ -15,7 +15,7 @@ use super::{
  *
  * @author Nils Homer
  */
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub(crate) struct ReadEndsForMarkDuplicates {
     pub(crate) score: i16,
     pub(crate) read1_index_in_file: i64,

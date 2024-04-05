@@ -4,7 +4,7 @@ use super::physical_location::{
     impl_physical_location_core, PhysicalLocation, PhysicalLocationShort,
 };
 
-#[derive(Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 pub(crate) struct ReadEnds {
     pub(crate) library_id: i16,
     pub(crate) orientation: i8,

@@ -25,7 +25,7 @@ use crate::{
             read_name_parser::ReadNameParserExt,
         },
     },
-    utils::{hash_code, logging::ProgressLogger, CommonHasher},
+    utils::{hash_code, logging::{init_global_logger, ProgressLogger}, CommonHasher},
 };
 
 use super::{
@@ -344,6 +344,8 @@ impl MarkDuplicates {
      * input file and writing it out with duplication flags set correctly.
      */
     pub(crate) fn do_work(&mut self) {
+        init_global_logger(self.cli.LOGGING_LEVEL);
+
         let use_barcodes = !self.cli.BARCODE_TAG.is_empty()
             || !self.cli.READ_ONE_BARCODE_TAG.is_empty()
             || !self.cli.READ_TWO_BARCODE_TAG.is_empty();

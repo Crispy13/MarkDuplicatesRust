@@ -108,7 +108,7 @@ pub(crate) struct ProgressLogger {
     last_read_name: String,
 
     start_time: Instant,
-    last_start_time: Option<Instant>,
+    last_start_time: Option<u64>,
     count_non_increasing: i64,
 
     processed: usize,
@@ -157,7 +157,7 @@ impl ProgressLogger {
         self.last_read_name.push_str(rname);
 
         if self.last_start_time.is_none() {
-            self.last_start_time = Some(Instant::now());
+            self.last_start_time = Some(self.start_time.elapsed().as_secs());
         }
 
         self.processed += 1;
@@ -169,11 +169,12 @@ impl ProgressLogger {
         }
     }
 
-    fn __record(&self) {
-        let instant = self.last_start_time.as_ref().unwrap();
-        let last_period_seconds = instant.elapsed().as_secs();
+    fn __record(&mut self) {
+        let seconds = self.start_time.elapsed().as_secs();
 
-        let seconds = instant.duration_since(self.start_time).as_secs();
+        let last_period_seconds = seconds - self.last_start_time.as_ref().unwrap();
+
+        self.last_start_time = Some(seconds);
 
         let elapsed = format_elapsed_time(seconds);
         let period = pad(&last_period_seconds.to_string(), 4);

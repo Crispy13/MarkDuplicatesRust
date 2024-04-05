@@ -4,9 +4,10 @@ use std::{
     fmt::Display,
     fs::{create_dir, remove_file, File, OpenOptions},
     hash::Hash,
-    io::{Read, Write},
+    io::{BufReader, BufWriter, Read, Write},
     mem::size_of,
     path::{Path, PathBuf},
+    process::exit,
     str::FromStr,
 };
 
@@ -49,12 +50,14 @@ where
         let work_dir = PathBuf::from_str("CSPI.tmp")?;
 
         match create_dir(&work_dir) {
-            Ok(_) => {},
-            Err(err) => if err.kind() == std::io::ErrorKind::AlreadyExists {
-                {}
-            } else {
-                Err(err)?
-            },
+            Ok(_) => {}
+            Err(err) => {
+                if err.kind() == std::io::ErrorKind::AlreadyExists {
+                    {}
+                } else {
+                    Err(err)?
+                }
+            }
         }
 
         Ok(Self {
@@ -96,7 +99,7 @@ where
         K: Borrow<Q>,
         Q: Hash + Eq;
 
-    fn get_output_stream_for_sequence(&mut self, mate_sequence_index: i32) -> Result<File, Error>;
+    fn get_output_stream_for_sequence(&mut self, mate_sequence_index: i32) -> Result<BufWriter<File>, Error>;
 
     fn ensure_sequence_loaded(&mut self, sequence_index: i32) -> Result<(), Error>;
 
@@ -129,14 +132,18 @@ where
         }
     }
 
-    fn get_output_stream_for_sequence(&mut self, mate_sequence_index: i32) -> Result<File, Error> {
+    fn get_output_stream_for_sequence(&mut self, mate_sequence_index: i32) -> Result<BufWriter<File>, Error> {
         let path = self.make_file_for_sequence(mate_sequence_index)?;
 
-        Ok(OpenOptions::new()
+        let f = OpenOptions::new()
             .write(true)
             .append(true)
             .create(true)
-            .open(&path).or_else(|err| Err(anyhow!("err={:?}, path={:?}", err, path)))?)
+            .open(&path)
+            .or_else(|err| Err(anyhow!("err={:?}, path={:?}", err, path)))?;
+
+        Ok(BufWriter::new(f))
+        
     }
 
     fn ensure_sequence_loaded(&mut self, sequence_index: i32) -> Result<(), Error> {
@@ -177,11 +184,30 @@ where
 
                 let mut input_stream;
 
-                input_stream = File::open(&map_on_disk)?;
+                input_stream = BufReader::new(File::open(&map_on_disk)?);
 
                 for i in (0..num_records.unwrap()) {
-                    let (key, record) =
-                        load_byte_file_as_obj::<Self::DataCodec>(&mut input_stream)?;
+                    let (key, record) = match load_byte_file_as_obj::<Self::DataCodec>(
+                        &mut input_stream,
+                    ) {
+                        Err(mut err) => {
+                            match err.downcast_mut::<crate::utils::errors::Error>() {
+                                Some(
+                                    crate::utils::errors::Error::FailedDeserializeFromByteFile {
+                                        input_file,
+                                        ..
+                                    },
+                                ) => {
+                                    input_file.push_str(map_on_disk.to_str().unwrap());
+                                    eprintln!("{:?}", err);
+                                    exit(-1)
+                                }
+                                _ => {}
+                            };
+                            Err(err)
+                        }
+                        oth => oth,
+                    }?;
                     let map_in_ram = self.map_in_ram.as_mut().unwrap();
                     if map_in_ram.contains_key(&key) {
                         Err(anyhow!(
@@ -275,11 +301,14 @@ impl<K, R> Drop for CoordinateSortedPairInfoMap<K, R> {
 mod test {
     use std::mem::size_of;
 
-    use crate::markdup::utils::read_ends_for_mark_duplicates_with_barcodes::ReadEndsBarcodeData;
+    use crate::markdup::utils::{
+        read_ends_for_mark_duplicates::ReadEndsForMarkDuplicates,
+        read_ends_for_mark_duplicates_with_barcodes::ReadEndsBarcodeData,
+    };
 
     use super::*;
     #[test]
-    fn save_and_load() {
+    fn raw_save_and_load() {
         let a = ReadEndsBarcodeData {
             barcode: 1,
             read_one_barcode: 2,
@@ -304,5 +333,33 @@ mod test {
         };
 
         println!("{:#?}", a_deser);
+    }
+
+    #[test]
+    fn save_and_load() {
+        let a = ReadEndsForMarkDuplicates {
+            score: 12,
+            read1_index_in_file: 1,
+            read2_index_in_file: 2,
+            ..Default::default()
+        };
+
+        let b = ReadEndsForMarkDuplicates {
+            score: 25,
+            read1_index_in_file: 33,
+            read2_index_in_file: 22,
+            ..Default::default()
+        };
+
+        let mut cspim =
+            CoordinateSortedPairInfoMap::<String, ReadEndsForMarkDuplicates>::new(10).unwrap();
+
+        const RG1:&'static str = "RG1";
+
+        cspim.put(1, RG1.into(), a.clone()).unwrap();
+
+        assert_eq!(a, cspim.remove(1, RG1).unwrap().unwrap());
+
+        
     }
 }
