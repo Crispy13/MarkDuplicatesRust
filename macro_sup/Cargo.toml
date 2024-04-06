@@ -1,0 +1,15 @@
+[package]
+name = "macro_sup"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+log = "0.4.21"
+proc-macro2 = "1.0.79"
+quote = "1.0.35"
+syn = "2.0.58"
+
+[lib]
+proc-macro = true
