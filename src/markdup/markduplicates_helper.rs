@@ -38,8 +38,6 @@ impl MarkDuplicatesHelper {
         }
     }
 
-    
-
     /**
      * Builds a read ends object that represents a single read.
      */
@@ -390,6 +388,31 @@ impl MarkDuplicatesHelper {
         }
 
         score as i32
+    }
+
+    pub(crate) fn get_read_duplicate_score(
+        &self,
+        md: &MarkDuplicates,
+        rec: &Record,
+        paired_ends: &ReadEndsForMarkDuplicates,
+    ) -> i16 {
+        match self {
+            MarkDuplicatesHelper::MarkDuplicatesHelper => {
+                DuplicateScoringStrategy::compute_duplicate_score(
+                    rec,
+                    md.cli.DUPLICATE_SCORING_STRATEGY,
+                    false,
+                )
+                .unwrap()
+            }
+            MarkDuplicatesHelper::MarkDuplicatesForFlowHelper => {
+                if md.cli.FLOW_QUALITY_SUM_STRATEGY {
+                    Self::compute_flow_duplicate_score(md, rec, paired_ends.read_ends.read2_coordinate)
+                } else {
+                    md.get_read_duplicate_score(rec, paired_ends)
+                }
+            },
+        }
     }
 }
 

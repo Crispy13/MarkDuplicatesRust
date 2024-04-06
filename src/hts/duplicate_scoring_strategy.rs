@@ -1,15 +1,18 @@
 use std::{fmt::Display, sync::OnceLock};
 
 use clap::ValueEnum;
+use macro_sup::set_mlog;
 use rust_htslib::bam::{ext::BamRecordExtensions, Record};
 
 use super::utils::murmur3::Murmur3;
 
+set_mlog!(stringify!(DuplicateScoringStrategy));
+
 type Error = Box<dyn std::error::Error + Send + Sync>;
 #[derive(ValueEnum, Clone, Debug, Copy)]
 pub(crate) enum ScoringStrategy {
-    SUM_OF_BASE_QUALITIES,
-    TOTAL_MAPPED_REFERENCE_LENGTH,
+    SumOfBaseQualities,
+    TotalMappedReferenceLength,
     RANDOM,
 }
 
@@ -64,12 +67,12 @@ impl DuplicateScoringStrategy {
         let mut score = 0_i16;
 
         match scoring_strategy {
-            ScoringStrategy::SUM_OF_BASE_QUALITIES => {
+            ScoringStrategy::SumOfBaseQualities => {
                 // two (very) long reads worth of high-quality bases can go over Short.MAX_VALUE/2
                 // and risk overflow.
                 score += Self::get_sum_of_base_qualities(rec).min(i16::MAX as i32 / 2) as i16;
             }
-            ScoringStrategy::TOTAL_MAPPED_REFERENCE_LENGTH => {
+            ScoringStrategy::TotalMappedReferenceLength => {
                 if !rec.is_unmapped() {
                     // no need to remember the score since this scoring mechanism is symmetric
                     score = rec
@@ -100,12 +103,18 @@ impl DuplicateScoringStrategy {
         // make sure that filter-failing records are heavily discounted. (the discount can happen twice, once
         // for each mate, so need to make sure we do not subtract more than Short.MIN_VALUE overall.)
         score += if rec.is_quality_check_failed() {
-            i16::MAX / 2
+            i16::MIN / 2
         } else {
             0
         };
 
         // TODO: save `score` to record.
+        mlog::debug!(
+            "score={}, qname={}, qual={:?}",
+            score,
+            std::str::from_utf8(rec.qname()).unwrap(),
+            rec.qual(),
+        );
 
         Ok(score)
     }

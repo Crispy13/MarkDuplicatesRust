@@ -13,7 +13,7 @@ set_mlog!(MarkDuplicates::log);
 use crate::{
     cmdline::cli::Cli,
     hts::{
-        duplicate_scoring_strategy::DuplicateScoringStrategy,
+        duplicate_scoring_strategy::{DuplicateScoringStrategy, ScoringStrategy},
         utils::sorting_collection::SortingCollection, SAMTag, SortOrder,
     },
     markdup::{
@@ -61,11 +61,13 @@ pub(crate) struct MarkDuplicates {
 }
 
 impl MarkDuplicates {
-    pub(crate) fn new(cli: Cli) -> Self {
+    pub(crate) fn new(mut cli: Cli) -> Self {
         const size_in_bytes: usize = size_of::<ReadEndsForMarkDuplicates>();
         let max_in_memory = ((24 * 10_usize.pow(9)) as f64 * cli.SORTING_COLLECTION_SIZE_RATIO
             / size_in_bytes as f64) as usize;
         let tmp_dir = cli.TMP_DIR.clone();
+
+        cli.DUPLICATE_SCORING_STRATEGY = ScoringStrategy::SumOfBaseQualities;
 
         Self {
             pg_ids_seen: HashSet::new(),
@@ -296,7 +298,7 @@ impl MarkDuplicates {
                             );
                         }
 
-                        paired_ends.score += self.get_read_duplicate_score(&rec, &paired_ends);
+                        paired_ends.score += self.calc_helper.get_read_duplicate_score(self,&rec, &paired_ends);
                         self.pair_sort.add(paired_ends)?;
                     }
                 }
@@ -337,7 +339,7 @@ impl MarkDuplicates {
         Ok(IndexedReader::from_path(self.cli.INPUT.first().unwrap())?)
     }
 
-    fn get_read_duplicate_score(
+    pub(super) fn get_read_duplicate_score(
         &self,
         rec: &Record,
         paired_ends: &ReadEndsForMarkDuplicates,

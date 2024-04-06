@@ -35,7 +35,7 @@ pub(crate) struct Cli {
         long = "DUPLICATE_SCORING_STRATEGY",
         value_name = "ScoringStrategy",
         value_enum,
-        default_value_t = ScoringStrategy::TOTAL_MAPPED_REFERENCE_LENGTH,
+        default_value_t = ScoringStrategy::TotalMappedReferenceLength,
     )]
     pub(crate) DUPLICATE_SCORING_STRATEGY: ScoringStrategy,
 
