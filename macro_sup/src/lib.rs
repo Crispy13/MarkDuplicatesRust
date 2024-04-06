@@ -62,7 +62,7 @@ fn define_log_macro(minput: &MInput, level: &str) -> TokenStream {
 }
 
 struct MInput {
-    target: syn::Expr,
+    target: TokenStream,
 }
 
 impl Parse for MInput {
