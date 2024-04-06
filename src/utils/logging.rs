@@ -58,8 +58,8 @@ fn logger_vec() -> &'static Mutex<Vec<Logger>> {
 pub(crate) fn default_configbuilder() -> ConfigBuilder {
     let stderr = ConsoleAppender::builder()
         .target(log4rs::append::console::Target::Stderr)
-        .encoder(Box::new(PatternEncoder::new(
-            "[{d(%Y-%m-%d %H:%M:%S)}] {T} {t} {l}>> {m}{n}",
+        .encoder(Box::new(log4rs::encode::pattern::PatternEncoder::new(
+            "{l:<7} {d(%Y-%m-%d %H:%M:%S)}     {t}  {m}{n}",
         )))
         .build();
 

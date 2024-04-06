@@ -8,9 +8,7 @@ use rust_htslib::bam::{
 
 use macro_sup::set_mlog;
 
-// set_mlog!(stringify!(MarkDuplicates));
-
-
+set_mlog!(MarkDuplicates::log);
 
 use crate::{
     cmdline::cli::Cli,
@@ -61,8 +59,6 @@ pub(crate) struct MarkDuplicates {
     frag_sort: SortingCollection<ReadEndsForMarkDuplicates>,
     pair_sort: SortingCollection<ReadEndsForMarkDuplicates>,
 }
-
-
 
 impl MarkDuplicates {
     pub(crate) fn new(cli: Cli) -> Self {
@@ -422,12 +418,10 @@ mod test {
 
     use super::*;
 
-    set_mlog!(stringify!(MarkDuplicatesTest));
-
     #[test]
     fn test_build_read_ends() {
         init_global_logger(log::LevelFilter::Debug);
-        mlog::warn!("works?");
+        // mlog::warn!("works?");
 
         let cli = Cli::parse_from([
             "",
