@@ -1,3 +1,4 @@
+workspace = { members = ["macro_sup"] }
 [package]
 name = "markdup_rust"
 version = "0.1.0"
@@ -12,6 +13,7 @@ bio-types = "1.0.1"
 clap = { version = "4.5.3", features = ["derive"] }
 log = "0.4.21"
 log4rs = "1.3.0"
+lru = "0.12.3"
 regex = "1.10.4"
 rust-htslib = { path = "./deps/rust-htslib" }
 serde = { version = "1.0.197", features = ["derive"] }
@@ -19,6 +21,10 @@ tempfile = "3.10.1"
 thiserror = "1.0.58"
 tikv-jemalloc-ctl = "0.5.4"
 tikv-jemallocator = "0.5.4"
+macro_sup = { path = "./macro_sup" }
+
+[profile.dev]
+incremental = true
 
 [profile.release]
 codegen-units=1

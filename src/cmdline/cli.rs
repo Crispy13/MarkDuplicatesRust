@@ -25,10 +25,10 @@ pub(crate) struct Cli {
     /// This number can be found by executing the 'ulimit -n' command on a Unix system.
     #[arg(
         long = "MAX_FILE_HANDLES_FOR_READ_ENDS_MAP",
-        value_name = "i32",
+        value_name = "usize",
         default_value_t = 8000
     )]
-    pub(crate) MAX_FILE_HANDLES_FOR_READ_ENDS_MAP: i32,
+    pub(crate) MAX_FILE_HANDLES_FOR_READ_ENDS_MAP: usize,
 
     /// The scoring strategy for choosing the non-duplicate among candidates.
     #[arg(
@@ -74,7 +74,7 @@ pub(crate) struct Cli {
     pub(crate) READ_TWO_BARCODE_TAG: String,
 
     /// One or more input SAM, BAM or CRAM files to analyze. Must be coordinate sorted.
-    #[arg(long = "INPUT", value_name = "String", required=true)]
+    #[arg(long = "INPUT", value_name = "Vec<String>", required=true, value_delimiter=',', num_args = 1.. )]
     pub(crate) INPUT: Vec<String>,
 
     /// enable parameters and behavior specific to flow based reads.

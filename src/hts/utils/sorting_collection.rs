@@ -79,13 +79,13 @@ where
         Self {
             tmp_dirs,
             ram_records,
-            done_adding:false,
-            iteration_started:false,
-            num_records_in_ram:0,
+            done_adding: false,
+            iteration_started: false,
+            num_records_in_ram: 0,
             max_records_in_ram,
             print_record_size_sampling,
-            files:Vec::new(),
-            cleaned_up:false,
+            files: Vec::new(),
+            cleaned_up: false,
         }
     }
 
@@ -139,6 +139,8 @@ where
 
         let mut buf_writer = BufWriter::new(f.as_file_mut());
 
+        save_as_byte_to_file(&self.num_records_in_ram, &mut buf_writer)?;
+
         self.ram_records
             .drain(..self.num_records_in_ram)
             .map(|r| save_as_byte_to_file(&r, &mut buf_writer))
@@ -184,7 +186,7 @@ where
      * Prepare to iterate through the records in order.  This method may be called more than once,
      * but add() may not be called after this method has been called.
      */
-    fn iter(&mut self) -> Result<SortingCollectionIter<T>, Error> {
+    pub(crate) fn iter(&mut self) -> Result<SortingCollectionIter<T>, Error> {
         if self.cleaned_up {
             panic!("Cannot call iterator() after cleanup() was called.");
         }
@@ -238,16 +240,26 @@ struct FileRecordIterator<R, T> {
     inner: R,
     buf: Vec<u8>,
 
+    n_remaining_record: usize,
     phantom_data: PhantomData<T>,
 }
 
-impl<R, T> FileRecordIterator<R, T> {
-    fn new(inner: R) -> Self {
+impl<R: Read, T> FileRecordIterator<R, T> {
+    fn new(mut inner: R) -> Self {
+        let n_remaining_record = Self::get_saved_count(&mut inner);
+
         Self {
             inner,
             buf: Vec::with_capacity(size_of::<T>()),
             phantom_data: PhantomData,
+            n_remaining_record,
         }
+    }
+
+    fn get_saved_count(inner: &mut R) -> usize {
+        // The file's first bytes indicates number of records.
+        // if the following fails, it means this software fails.
+        bincode::deserialize_from::<_, usize>(inner).unwrap()
     }
 }
 
@@ -255,21 +267,27 @@ impl<T: for<'de> Deserialize<'de>, R: Read> Iterator for FileRecordIterator<R, T
     type Item = T;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let buf = &mut self.buf;
+        // let buf = &mut self.buf;
 
-        buf.clear();
+        // buf.clear();
 
-        match self.inner.read_exact(buf) {
-            Ok(_) => {}
-            Err(err) => match err.kind() {
-                std::io::ErrorKind::UnexpectedEof => return None,
-                err => panic!("{:?}", err),
-            },
-        }
+        // match self.inner.read_exact(buf) {
+        //     Ok(_) => {}
+        //     Err(err) => match err.kind() {
+        //         std::io::ErrorKind::UnexpectedEof => return None,
+        //         err => panic!("{:?}", err),
+        //     },
+        // }
 
-        match bincode::deserialize(&buf) {
-            Ok(v) => Some(v),
-            Err(err) => panic!("{:?}", err),
+        // match bincode::deserialize(&buf) {
+        //     Ok(v) => Some(v),
+        //     Err(err) => panic!("{:?}", err),
+        // }
+        if self.n_remaining_record > 0 {
+            self.n_remaining_record -= 1;
+            Some(bincode::deserialize_from::<_, T>(&mut self.inner).unwrap())
+        } else {
+            None
         }
     }
 }
@@ -282,6 +300,7 @@ where
     iter: FileRecordIterator<R, T>,
     n: i32,
     peeked: Option<Option<T>>,
+    // n_remaining_record: usize,
 }
 
 impl<R, T> Iterator for PeekFileRecordIterator<R, T>
@@ -309,11 +328,14 @@ where
     T: for<'de> Deserialize<'de>,
     R: Read,
 {
-    fn new(iter: FileRecordIterator<R, T>, n: i32) -> Self {
+    fn new(file_iter: FileRecordIterator<R, T>, n: i32) -> Self {
+        // let n_remaining_record = Self::get_saved_count(&mut file_iter);
+
         let mut s = Self {
-            iter,
+            iter: file_iter,
             n,
             peeked: None,
+            // n_remaining_record
         };
 
         s.peek();
@@ -432,7 +454,9 @@ where
 
 #[cfg(test)]
 mod test {
-    use std::fs::File;
+    use std::{fs::File, str::FromStr};
+
+    use crate::markdup::utils::read_ends_for_mark_duplicates::ReadEndsForMarkDuplicates;
 
     use super::*;
 
@@ -461,5 +485,49 @@ mod test {
         let a = A { m: b.ref_mut() };
 
         v.push(b.consume());
+    }
+
+    #[test]
+    fn save_and_load() {
+        let mut sc = SortingCollection::<ReadEndsForMarkDuplicates>::new(
+            1,
+            false,
+            vec![PathBuf::from_str(".tmp").unwrap()],
+        );
+
+        let mut a = ReadEndsForMarkDuplicates {
+            score: 12,
+            read1_index_in_file: 1,
+            read2_index_in_file: 2,
+            ..Default::default()
+        };
+
+        a.read_ends.read2_coordinate = 55534;
+
+        let mut b = ReadEndsForMarkDuplicates {
+            score: 25,
+            read1_index_in_file: 33,
+            read2_index_in_file: 22,
+            ..Default::default()
+        };
+
+        b.read_ends.read2_coordinate = 12231;
+
+        let mut c: ReadEndsForMarkDuplicates = ReadEndsForMarkDuplicates {
+            score: 25,
+            read1_index_in_file: 112,
+            read2_index_in_file: 22,
+            ..Default::default()
+        };
+
+        c.read_ends.read2_coordinate = 9978;
+
+        sc.add(a).unwrap();
+
+        sc.add(b).unwrap();
+
+        sc.add(c).unwrap();
+
+        println!("{:#?}", sc.iter().unwrap().collect::<Vec<_>>());
     }
 }

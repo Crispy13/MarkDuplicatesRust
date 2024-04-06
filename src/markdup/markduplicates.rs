@@ -6,6 +6,12 @@ use rust_htslib::bam::{
     HeaderView, IndexedReader, Read, Record,
 };
 
+use macro_sup::set_mlog;
+
+// set_mlog!(stringify!(MarkDuplicates));
+
+
+
 use crate::{
     cmdline::cli::Cli,
     hts::{
@@ -25,7 +31,11 @@ use crate::{
             read_name_parser::ReadNameParserExt,
         },
     },
-    utils::{hash_code, logging::{init_global_logger, ProgressLogger}, CommonHasher},
+    utils::{
+        hash_code,
+        logging::{init_global_logger, ProgressLogger},
+        CommonHasher,
+    },
 };
 
 use super::{
@@ -52,10 +62,10 @@ pub(crate) struct MarkDuplicates {
     pair_sort: SortingCollection<ReadEndsForMarkDuplicates>,
 }
 
+
+
 impl MarkDuplicates {
-    pub(crate) fn new(
-        cli: Cli,
-    ) -> Self {
+    pub(crate) fn new(cli: Cli) -> Self {
         const size_in_bytes: usize = size_of::<ReadEndsForMarkDuplicates>();
         let max_in_memory = ((24 * 10_usize.pow(9)) as f64 * cli.SORTING_COLLECTION_SIZE_RATIO
             / size_in_bytes as f64) as usize;
@@ -88,7 +98,13 @@ impl MarkDuplicates {
                 MarkDuplicatesHelper::build_read_ends_normal(self, header, index, rec, use_barcode)
             }
             MarkDuplicatesHelper::MarkDuplicatesForFlowHelper => {
-                MarkDuplicatesHelper::build_read_ends_for_flow(self, header, index, rec, use_barcode)
+                MarkDuplicatesHelper::build_read_ends_for_flow(
+                    self,
+                    header,
+                    index,
+                    rec,
+                    use_barcode,
+                )
             }
         }
     }
@@ -96,7 +112,8 @@ impl MarkDuplicates {
     fn build_sorted_read_end_vecs(&mut self, use_barcodes: bool) -> Result<(), Error> {
         let mut indexed_reader = self.open_inputs()?;
 
-        let size_in_bytes = size_of::<ReadEndsForMarkDuplicates>();
+        #[allow(non_upper_case_globals)]
+        const size_in_bytes: usize = size_of::<ReadEndsForMarkDuplicates>();
 
         // TODO: MAX_RECORDS_IN_RAM~
 
@@ -190,7 +207,7 @@ impl MarkDuplicates {
                         rec.get_read_group()?.get_read_group_id(),
                         qname
                     )
-                    .unwrap();
+                    .unwrap(); // Writing to string is infallable.
 
                     let paired_ends_opt = tmp.remove(rec.tid(), &key)?;
 
@@ -396,5 +413,35 @@ trait MarkDuplicatesExt {
         }
 
         are_comparable
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use clap::Parser;
+
+    use super::*;
+
+    set_mlog!(stringify!(MarkDuplicatesTest));
+
+    #[test]
+    fn test_build_read_ends() {
+        init_global_logger(log::LevelFilter::Debug);
+        mlog::warn!("works?");
+
+        let cli = Cli::parse_from([
+            "",
+            "--INPUT",
+            "tests/data/NA12878.chrom11.20.bam", //
+        ]);
+
+        let mut md = MarkDuplicates::new(cli);
+
+        md.build_sorted_read_end_vecs(false).unwrap();
+
+        let ps = md.pair_sort.iter().unwrap().collect::<Vec<_>>();
+        let fs = md.frag_sort.iter().unwrap().collect::<Vec<_>>();
+        println!("pair_sort(N={})={:#?}", ps.len(), ps);
+        println!("frag_sort(N={})={:#?}", fs.len(), fs);
     }
 }

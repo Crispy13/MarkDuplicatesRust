@@ -15,7 +15,7 @@ pub(crate) struct DiskBasedReadEndsForMarkDuplicatesMap {
 }
 
 impl DiskBasedReadEndsForMarkDuplicatesMap {
-    pub(crate) fn new(max_open_files: i32) -> Result<Self, Error> {
+    pub(crate) fn new(max_open_files: usize) -> Result<Self, Error> {
         Ok(Self {
             pair_info_map: CoordinateSortedPairInfoMap::new(max_open_files)?,
         })

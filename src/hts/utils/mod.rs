@@ -8,6 +8,7 @@ use std::{
 
 pub(crate) mod murmur3;
 pub(crate) mod sorting_collection;
+pub(crate) mod file_append_stream_lru_cache;
 
 pub(crate) fn save_as_byte_to_file<T: Serialize>(
     value: &T,

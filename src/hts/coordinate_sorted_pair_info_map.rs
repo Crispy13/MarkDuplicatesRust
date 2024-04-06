@@ -2,7 +2,7 @@ use std::{
     borrow::Borrow,
     collections::{HashMap, HashSet},
     fmt::Display,
-    fs::{create_dir, remove_file, File, OpenOptions},
+    fs::{create_dir, remove_dir, remove_file, File, OpenOptions},
     hash::Hash,
     io::{BufReader, BufWriter, Read, Write},
     mem::size_of,
@@ -18,11 +18,10 @@ use crate::utils::PathExt;
 // type Error = Box<dyn std::error::Error + Send + Sync>;
 use anyhow::{anyhow, Error};
 
-use super::utils::{load_byte_file_as_obj, save_as_byte_to_file};
-
-struct FileAppendStreamLRUCache {
-    cache_size: i32,
-}
+use super::utils::{
+    file_append_stream_lru_cache::FileAppendStreamLRUCache, load_byte_file_as_obj,
+    save_as_byte_to_file,
+};
 
 pub(crate) struct CoordinateSortedPairInfoMap<K, R> {
     work_dir: PathBuf,
@@ -44,7 +43,7 @@ where
     const INVALID_SEQUENCE_INDEX: i32 = -2;
 
     pub(crate) fn new(
-        max_open_file: i32,
+        max_open_file: usize,
         // element_codec: Codec<K, R>,
     ) -> Result<Self, Error> {
         let work_dir = PathBuf::from_str("CSPI.tmp")?;
@@ -66,9 +65,7 @@ where
             map_in_ram: None,
             size_of_map_on_disk: HashMap::new(),
             iteration_in_progress: false,
-            output_streams: FileAppendStreamLRUCache {
-                cache_size: max_open_file,
-            },
+            output_streams: FileAppendStreamLRUCache::new(max_open_file),
             files_to_delete_on_drop: HashSet::new(),
         })
     }
@@ -87,6 +84,19 @@ where
     }
 }
 
+
+
+/// Do the same process as `self.get_output_stream_for_sequence()` call.
+///
+/// Just made this for satisfying borrow checker.
+macro_rules! get_output_stream_for_sequence {
+    ($self:ident, $mate_sequence_index:expr) => {{
+        let path = $self.make_file_for_sequence($mate_sequence_index)?;
+
+        $self.output_streams.get_or_insert(path)?
+    }};
+}
+
 pub(crate) trait CoordinateSortedPairInfoMapExt<K, R>
 where
     K: std::cmp::Eq + PartialEq + Hash + Serialize + for<'de> Deserialize<'de> + Display,
@@ -99,7 +109,10 @@ where
         K: Borrow<Q>,
         Q: Hash + Eq;
 
-    fn get_output_stream_for_sequence(&mut self, mate_sequence_index: i32) -> Result<BufWriter<File>, Error>;
+    fn get_output_stream_for_sequence(
+        &mut self,
+        mate_sequence_index: i32,
+    ) -> Result<&mut BufWriter<File>, Error>;
 
     fn ensure_sequence_loaded(&mut self, sequence_index: i32) -> Result<(), Error>;
 
@@ -132,18 +145,13 @@ where
         }
     }
 
-    fn get_output_stream_for_sequence(&mut self, mate_sequence_index: i32) -> Result<BufWriter<File>, Error> {
+    fn get_output_stream_for_sequence(
+        &mut self,
+        mate_sequence_index: i32,
+    ) -> Result<&mut BufWriter<File>, Error> {
         let path = self.make_file_for_sequence(mate_sequence_index)?;
 
-        let f = OpenOptions::new()
-            .write(true)
-            .append(true)
-            .create(true)
-            .open(&path)
-            .or_else(|err| Err(anyhow!("err={:?}, path={:?}", err, path)))?;
-
-        Ok(BufWriter::new(f))
-        
+        Ok(self.output_streams.get_or_insert(path)?)
     }
 
     fn ensure_sequence_loaded(&mut self, sequence_index: i32) -> Result<(), Error> {
@@ -152,11 +160,9 @@ where
             if self.map_in_ram.is_some() {
                 map_on_disk = self.make_file_for_sequence(self.sequence_index_of_map_in_ram)?;
 
-                // file existence is checked in `make_file_for_sequence`
-
                 if !self.map_in_ram.as_ref().unwrap().is_empty() {
-                    let mut os =
-                        self.get_output_stream_for_sequence(self.sequence_index_of_map_in_ram)?;
+                    let os =
+                        get_output_stream_for_sequence!(self, self.sequence_index_of_map_in_ram);
 
                     let map_in_ram = self.map_in_ram.as_mut().unwrap();
 
@@ -166,7 +172,7 @@ where
                     // write read ends to file
                     map_in_ram
                         .drain()
-                        .map(|(k, v)| save_as_byte_to_file(&(k, v), &mut os))
+                        .map(|(k, v)| save_as_byte_to_file(&(k, v), os))
                         .collect::<Result<Vec<_>, Error>>()?;
                 }
             } else {
@@ -174,7 +180,10 @@ where
             }
 
             self.sequence_index_of_map_in_ram = sequence_index;
+
+            // Load map from disk if it existed
             map_on_disk = self.make_file_for_sequence(sequence_index)?;
+            self.output_streams.remove(&map_on_disk); // We don't need to consider whether remove() call returns Some or None.
 
             let num_records = self.size_of_map_on_disk.remove(&sequence_index);
             if map_on_disk.exists() {
@@ -187,11 +196,10 @@ where
                 input_stream = BufReader::new(File::open(&map_on_disk)?);
 
                 for i in (0..num_records.unwrap()) {
-                    let (key, record) = match load_byte_file_as_obj::<Self::DataCodec>(
-                        &mut input_stream,
-                    ) {
-                        Err(mut err) => {
-                            match err.downcast_mut::<crate::utils::errors::Error>() {
+                    let (key, record) =
+                        match load_byte_file_as_obj::<Self::DataCodec>(&mut input_stream) {
+                            Err(mut err) => {
+                                match err.downcast_mut::<crate::utils::errors::Error>() {
                                 Some(
                                     crate::utils::errors::Error::FailedDeserializeFromByteFile {
                                         input_file,
@@ -204,10 +212,10 @@ where
                                 }
                                 _ => {}
                             };
-                            Err(err)
-                        }
-                        oth => oth,
-                    }?;
+                                Err(err)
+                            }
+                            oth => oth,
+                        }?;
                     let map_in_ram = self.map_in_ram.as_mut().unwrap();
                     if map_in_ram.contains_key(&key) {
                         Err(anyhow!(
@@ -288,6 +296,8 @@ impl<K, R> Drop for CoordinateSortedPairInfoMap<K, R> {
             .iter()
             .for_each(|fp| remove_file(fp).unwrap_or_else(|err| ()));
         //TODO: log a message when removing fails as debug level
+
+        remove_dir(&self.work_dir).unwrap_or_else(|err| ());
     }
 }
 
@@ -354,12 +364,11 @@ mod test {
         let mut cspim =
             CoordinateSortedPairInfoMap::<String, ReadEndsForMarkDuplicates>::new(10).unwrap();
 
-        const RG1:&'static str = "RG1";
+        const RG1: &'static str = "RG1";
 
         cspim.put(1, RG1.into(), a.clone()).unwrap();
+        cspim.put(1, RG1.into(), b.clone()).unwrap();
 
         assert_eq!(a, cspim.remove(1, RG1).unwrap().unwrap());
-
-        
     }
 }
