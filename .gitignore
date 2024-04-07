@@ -3,3 +3,4 @@ tests/data
 res.txt
 test_a.bytes
 .vscode
+*.json
