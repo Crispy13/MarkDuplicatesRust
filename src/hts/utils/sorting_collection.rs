@@ -135,7 +135,7 @@ where
             panic!("Code error. Failed to get slice of `ram_records` with index 0..self.num_records_in_ram.");
         }).sort();
 
-        let mut f = NamedTempFile::new()?;
+        let mut f = tempfile::Builder::new().prefix(".markdup_rust").tempfile()?;
 
         let mut buf_writer = BufWriter::new(f.as_file_mut());
 
@@ -442,7 +442,7 @@ where
             None => return None,
         };
 
-        let ret = file_iterator.next().unwrap();
+        let ret = file_iterator.next().unwrap(); // only file_iters having a next item are contained in `self.queue`
 
         if let Some(_) = file_iterator.peek() {
             self.queue.insert(file_iterator);

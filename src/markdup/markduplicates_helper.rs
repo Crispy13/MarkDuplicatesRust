@@ -54,7 +54,7 @@ impl MarkDuplicatesHelper {
         read_ends.read1_coordinate = if rec.is_reverse() {
             rec.reference_end() as i32
         } else {
-            rec.reference_start() as i32
+            rec.reference_start() as i32 + 1 // +1 to convert it into 1-based.
         };
 
         read_ends.orientation = if rec.is_reverse() {

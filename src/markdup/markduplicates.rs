@@ -14,7 +14,8 @@ use crate::{
     cmdline::cli::Cli,
     hts::{
         duplicate_scoring_strategy::{DuplicateScoringStrategy, ScoringStrategy},
-        utils::sorting_collection::SortingCollection, SAMTag, SortOrder,
+        utils::sorting_collection::SortingCollection,
+        SAMTag, SortOrder,
     },
     markdup::{
         estimate_library_complexity::EstimateLibraryComplexity,
@@ -298,7 +299,9 @@ impl MarkDuplicates {
                             );
                         }
 
-                        paired_ends.score += self.calc_helper.get_read_duplicate_score(self,&rec, &paired_ends);
+                        paired_ends.score +=
+                            self.calc_helper
+                                .get_read_duplicate_score(self, &rec, &paired_ends);
                         self.pair_sort.add(paired_ends)?;
                     }
                 }
@@ -416,7 +419,11 @@ trait MarkDuplicatesExt {
 
 #[cfg(test)]
 mod test {
+    use std::path::Path;
+
     use clap::Parser;
+
+    use crate::tests::{from_java_read_ends, JavaReadEndIterator, ToJsonFileForTest};
 
     use super::*;
 
@@ -425,19 +432,37 @@ mod test {
         init_global_logger(log::LevelFilter::Debug);
         // mlog::warn!("works?");
 
+        let bam_path =
+            Path::new("tests/data/NA12878.mapped.ILLUMINA.bwa.CEU.low_coverage.20121211.bam");
+
         let cli = Cli::parse_from([
             "",
             "--INPUT",
-            "tests/data/NA12878.chrom11.20.bam", //
+            bam_path.to_str().unwrap(), //
         ]);
 
         let mut md = MarkDuplicates::new(cli);
 
-        md.build_sorted_read_end_vecs(false).unwrap();
+        // md.build_sorted_read_end_vecs(false).unwrap();
 
-        let ps = md.pair_sort.iter().unwrap().collect::<Vec<_>>();
-        let fs = md.frag_sort.iter().unwrap().collect::<Vec<_>>();
-        println!("pair_sort(N={})={:#?}", ps.len(), ps);
-        println!("frag_sort(N={})={:#?}", fs.len(), fs);
+        // let ps = md.pair_sort.iter().unwrap();
+        // let fs = md.frag_sort.iter().unwrap();
+        // println!("pair_sort(N={})={:#?}", ps.len(), ps);
+        // println!("frag_sort(N={})={:#?}", fs.len(), fs);
+
+        // let ps_json_path = format!("{}.pair_sort.rust.json", bam_path.file_stem().unwrap().to_str().unwrap());
+        // let fs_json_path = format!("{}.frag_sort.rust.json", bam_path.file_stem().unwrap().to_str().unwrap());
+        // ps.save_object_to_json(&ps_json_path);
+        // fs.save_object_to_json(&fs_json_path);
+
+        // println!("ps_json_path={}\nfs_json_pat={}", ps_json_path, fs_json_path)
+
+        JavaReadEndIterator::new("tests/data/NA12878.chrom11.20.bam.20.pairSort.read.ends")
+            .for_each(|e| {
+                println!("{:#?}", from_java_read_ends(e));
+            })
+
+        // assert_eq!(ps, from_java_read_ends_to_rust_read_ends("tests/data/NA12878.chrom11.20.bam.20.pairSort.read.ends"));
+        // assert_eq!(fs, from_java_read_ends_to_rust_read_ends("tests/data/NA12878.chrom11.20.bam.20.fragSort.read.ends"));
     }
 }

@@ -9,6 +9,7 @@ mod cmdline;
 mod markdup;
 mod hts;
 mod utils;
+mod tests;
 
 fn main() {
     let cli = Cli::parse();

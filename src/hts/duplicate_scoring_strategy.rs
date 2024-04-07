@@ -109,12 +109,12 @@ impl DuplicateScoringStrategy {
         };
 
         // TODO: save `score` to record.
-        mlog::debug!(
-            "score={}, qname={}, qual={:?}",
-            score,
-            std::str::from_utf8(rec.qname()).unwrap(),
-            rec.qual(),
-        );
+        // mlog::debug!(
+        //     "score={}, qname={}, qual={:?}",
+        //     score,
+        //     std::str::from_utf8(rec.qname()).unwrap(),
+        //     rec.qual(),
+        // );
 
         Ok(score)
     }
