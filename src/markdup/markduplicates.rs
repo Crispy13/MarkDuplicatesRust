@@ -14,7 +14,9 @@ use crate::{
     cmdline::cli::Cli,
     hts::{
         duplicate_scoring_strategy::{DuplicateScoringStrategy, ScoringStrategy},
-        utils::sorting_collection::SortingCollection,
+        utils::{
+            sorting_collection::SortingCollection, sorting_long_collection::SortingLongCollection,
+        },
         SAMTag, SortOrder,
     },
     markdup::{
@@ -43,6 +45,7 @@ use super::{
         optical_duplicate_finder::OpticalDuplicateFinder, physical_location::PhysicalLocation,
         read_ends_for_mark_duplicates::ReadEndsForMarkDuplicates,
         read_ends_for_mark_duplicates_with_barcodes::ReadEndsBarcodeData,
+        representative_read_indexer::RepresentativeReadIndexer,
     },
 };
 
@@ -57,8 +60,13 @@ pub(crate) struct MarkDuplicates {
 
     calc_helper: MarkDuplicatesHelper,
 
-    frag_sort: SortingCollection<ReadEndsForMarkDuplicates>,
-    pair_sort: SortingCollection<ReadEndsForMarkDuplicates>,
+    pub(super) frag_sort: SortingCollection<ReadEndsForMarkDuplicates>,
+    pub(super) pair_sort: SortingCollection<ReadEndsForMarkDuplicates>,
+
+    duplicate_indexes: SortingLongCollection,
+    optical_duplicate_indexes: SortingLongCollection,
+
+    representative_read_indices_for_duplicates: SortingCollection<RepresentativeReadIndexer>,
 }
 
 impl MarkDuplicates {
@@ -78,6 +86,11 @@ impl MarkDuplicates {
             calc_helper: MarkDuplicatesHelper::MarkDuplicatesHelper,
             frag_sort: SortingCollection::new(max_in_memory, false, tmp_dir.clone()),
             pair_sort: SortingCollection::new(max_in_memory, false, tmp_dir),
+
+            duplicate_indexes: Default::default(),
+            optical_duplicate_indexes: Default::default(),
+            representative_read_indices_for_duplicates: Default::default(),
+            
         }
     }
 
@@ -379,9 +392,54 @@ impl MarkDuplicates {
 
         todo!()
     }
+
+    /**
+     * Goes through the accumulated ReadEndsForMarkDuplicates objects and determines
+     * which of them are
+     * to be marked as duplicates.
+     */
+    pub(crate) fn sort_indices_for_duplicates(&mut self, index_optical_duplicates: bool) {
+        let entry_overhead = if self.cli.TAG_DUPLICATE_SET_MEMBERS {
+            // Memory requirements for RepresentativeReadIndexer:
+            // three int entries + overhead: (3 * 4) + 4 = 16 bytes
+            16
+        } else {
+            SortingLongCollection::SIZEOF
+        };
+
+        // Keep this number from getting too large even if there is a huge heap.
+        let mut max_in_memory =
+            (self.cli.MAX_MEMORY as f64 * 0.25 / entry_overhead as f64).min((i32::MAX - 5) as f64);
+
+        // If we're also tracking optical duplicates, reduce maxInMemory, since we'll
+        // need two sorting collections
+        if index_optical_duplicates {
+            max_in_memory /=
+                ((entry_overhead + SortingLongCollection::SIZEOF) / entry_overhead) as f64;
+            self.optical_duplicate_indexes = SortingLongCollection::new(
+                max_in_memory as usize,
+                Vec::with_capacity(self.cli.TMP_DIR.len()),
+            );
+        }
+
+        mlog::info!(
+            "Will retain up to {} duplicate indices before spilling to disk.",
+            max_in_memory
+        );
+        self.duplicate_indexes = SortingLongCollection::new(
+            max_in_memory as usize,
+            Vec::with_capacity(self.cli.TMP_DIR.len()),
+        );
+
+        if self.cli.TAG_DUPLICATE_SET_MEMBERS {
+            self.representative_read_indices_for_duplicates =
+                SortingCollection::new(max_in_memory as usize, false, self.cli.TMP_DIR.clone());
+        }
+    }
+
 }
 
-trait MarkDuplicatesExt {
+pub(super) trait MarkDuplicatesExt {
     fn are_comparable_for_duplicates(
         lhs: &ReadEndsForMarkDuplicates,
         rhs: &ReadEndsForMarkDuplicates,
@@ -417,6 +475,10 @@ trait MarkDuplicatesExt {
     }
 }
 
+impl MarkDuplicatesExt for MarkDuplicates {
+
+}
+
 #[cfg(test)]
 mod test {
     use std::path::Path;
@@ -432,6 +494,8 @@ mod test {
         init_global_logger(log::LevelFilter::Debug);
         // mlog::warn!("works?");
 
+        // NA12878.mapped.ILLUMINA.bwa.CEU.low_coverage.20121211.bam
+        // NA12878.chrom11.100.bam
         let bam_path =
             Path::new("tests/data/NA12878.mapped.ILLUMINA.bwa.CEU.low_coverage.20121211.bam");
 
@@ -443,10 +507,12 @@ mod test {
 
         let mut md = MarkDuplicates::new(cli);
 
-        // md.build_sorted_read_end_vecs(false).unwrap();
+        md.build_sorted_read_end_vecs(false).unwrap();
 
-        // let ps = md.pair_sort.iter().unwrap();
-        // let fs = md.frag_sort.iter().unwrap();
+        let mut ps = md.pair_sort.iter().unwrap();
+        let fs = md.frag_sort.iter().unwrap();
+        // println!("ps_item={:#?}", ps.next().unwrap());
+
         // println!("pair_sort(N={})={:#?}", ps.len(), ps);
         // println!("frag_sort(N={})={:#?}", fs.len(), fs);
 
@@ -457,11 +523,21 @@ mod test {
 
         // println!("ps_json_path={}\nfs_json_pat={}", ps_json_path, fs_json_path)
 
-        JavaReadEndIterator::new("tests/data/NA12878.chrom11.20.bam.20.pairSort.read.ends")
-            .for_each(|e| {
-                println!("{:#?}", from_java_read_ends(e));
-            })
+        JavaReadEndIterator::new(format!("{}.pairSort.java.json", bam_path.to_str().unwrap()))
+            .map(from_java_read_ends)
+            .zip(ps)
+            .enumerate()
+            .for_each(|(i, (j, r))| {
+                assert_eq!(j, r, ">> i={}\njava={:#?}\n\nrust={:#?}", i, j, r);
+            });
 
+        // JavaReadEndIterator::new(format!("{}.fragSort.java.json", bam_path.to_str().unwrap()))
+        //     .map(from_java_read_ends)
+        //     .zip(fs)
+        //     .enumerate()
+        //     .for_each(|( i, (j, r))|{
+        //         assert_eq!(j, r, ">> i={}\njava={:#?}\n\nrust={:#?}", i, j, r);
+        //     });
         // assert_eq!(ps, from_java_read_ends_to_rust_read_ends("tests/data/NA12878.chrom11.20.bam.20.pairSort.read.ends"));
         // assert_eq!(fs, from_java_read_ends_to_rust_read_ends("tests/data/NA12878.chrom11.20.bam.20.fragSort.read.ends"));
     }

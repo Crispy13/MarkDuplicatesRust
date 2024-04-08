@@ -6,10 +6,10 @@ use markdup::markduplicates::MarkDuplicates;
 static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
 mod cmdline;
-mod markdup;
 mod hts;
-mod utils;
+mod markdup;
 mod tests;
+mod utils;
 
 fn main() {
     let cli = Cli::parse();

@@ -17,6 +17,8 @@ use super::{
  */
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub(crate) struct ReadEndsForMarkDuplicates {
+    pub(crate) read1_qname: String,
+
     pub(crate) score: i16,
     pub(crate) read1_index_in_file: i64,
     pub(crate) read2_index_in_file: i64,
@@ -72,6 +74,7 @@ impl ReadEndsForMarkDuplicates {
         };
 
         Self {
+            read1_qname: String::new(),
             score: read.score,
             read1_index_in_file: read.read1_index_in_file,
             read2_index_in_file: read.read2_index_in_file,
@@ -95,6 +98,7 @@ impl fmt::Display for ReadEndsForMarkDuplicates {
 impl Default for ReadEndsForMarkDuplicates {
     fn default() -> Self {
         Self {
+            read1_qname:String::new(),
             score: 0,
             read1_index_in_file: -1,
             read2_index_in_file: -1,
@@ -232,6 +236,15 @@ impl PartialEq for ReadEndsForMarkDuplicates {
 impl Eq for ReadEndsForMarkDuplicates {}
 impl Ord for ReadEndsForMarkDuplicates {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.partial_cmp(other).unwrap_or_else(|| panic!("impl Ord failed for `ReadEndsForMarkDuplicates`."))
+        self.partial_cmp(other)
+            .unwrap_or_else(|| panic!("impl Ord failed for `ReadEndsForMarkDuplicates`."))
     }
+}
+
+
+pub(crate) enum ReadEndsForMarkDuplicatesCow<'a> {
+    /// Borrowed data.
+    Borrowed(&'a ReadEndsForMarkDuplicates),
+
+    
 }

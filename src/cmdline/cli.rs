@@ -78,59 +78,103 @@ pub(crate) struct Cli {
     pub(crate) INPUT: Vec<String>,
 
     /// enable parameters and behavior specific to flow based reads.
-    #[arg(long = "FLOW_MODE", value_name = "bool", default_value_t=false)]
+    #[arg(long = "FLOW_MODE", value_name = "bool", default_value_t = false)]
     pub(crate) FLOW_MODE: bool,
 
-    /// Use position of the clipping as the end position, when considering duplicates (or use the unclipped end position) 
+    /// Use position of the clipping as the end position, when considering duplicates (or use the unclipped end position)
     /// (for this argument, \"read end\" means 3' end).
-    #[arg(long = "USE_UNPAIRED_CLIPPED_END", value_name = "bool", default_value_t=false)]
+    #[arg(
+        long = "USE_UNPAIRED_CLIPPED_END",
+        value_name = "bool",
+        default_value_t = false
+    )]
     pub(crate) USE_UNPAIRED_CLIPPED_END: bool,
 
-    /// Skip first N flows, starting from the read's start, when considering duplicates. Useful for flow based reads where sometimes there 
-    /// is noise in the first flows 
+    /// Skip first N flows, starting from the read's start, when considering duplicates. Useful for flow based reads where sometimes there
+    /// is noise in the first flows
     /// (for this argument, \"read start\" means 5' end).
-    #[arg(long = "FLOW_SKIP_FIRST_N_FLOWS", value_name = "i32", default_value_t=0)]
+    #[arg(
+        long = "FLOW_SKIP_FIRST_N_FLOWS",
+        value_name = "i32",
+        default_value_t = 0
+    )]
     pub(crate) FLOW_SKIP_FIRST_N_FLOWS: i32,
 
-    /// Treat position of read trimming based on quality as the known end (relevant for flow based reads). Default false - if the read 
+    /// Treat position of read trimming based on quality as the known end (relevant for flow based reads). Default false - if the read
     /// is trimmed on quality its end is not defined and the read is duplicate of any read starting at the same place.
-    #[arg(long = "FLOW_Q_IS_KNOWN_END", value_name = "bool", default_value_t=false)]
+    #[arg(
+        long = "FLOW_Q_IS_KNOWN_END",
+        value_name = "bool",
+        default_value_t = false
+    )]
     pub(crate) FLOW_Q_IS_KNOWN_END: bool,
 
-    /// Use specific quality summing strategy for flow based reads. The strategy ensures that the same 
+    /// Use specific quality summing strategy for flow based reads. The strategy ensures that the same
     /// (and correct) quality value is used for all bases of the same homopolymer.
-    #[arg(long = "FLOW_QUALITY_SUM_STRATEGY", value_name = "bool", default_value_t=false)]
+    #[arg(
+        long = "FLOW_QUALITY_SUM_STRATEGY",
+        value_name = "bool",
+        default_value_t = false
+    )]
     pub(crate) FLOW_QUALITY_SUM_STRATEGY: bool,
 
     /// Threshold for considering a quality value high enough to be included when calculating FLOW_QUALITY_SUM_STRATEGY calculation.
-    #[arg(long = "FLOW_EFFECTIVE_QUALITY_THRESHOLD", value_name = "i32", default_value_t=15)]
+    #[arg(
+        long = "FLOW_EFFECTIVE_QUALITY_THRESHOLD",
+        value_name = "i32",
+        default_value_t = 15
+    )]
     pub(crate) FLOW_EFFECTIVE_QUALITY_THRESHOLD: i32,
 
-    /// Maximal difference of the read end position that counted as equal. Useful for flow based 
-    /// reads where the end position might vary due to sequencing errors. 
+    /// Maximal difference of the read end position that counted as equal. Useful for flow based
+    /// reads where the end position might vary due to sequencing errors.
     /// (for this argument, \"read end\" means 3' end)
-    #[arg(long = "UNPAIRED_END_UNCERTAINTY", value_name = "i32", default_value_t=0)]
+    #[arg(
+        long = "UNPAIRED_END_UNCERTAINTY",
+        value_name = "i32",
+        default_value_t = 0
+    )]
     pub(crate) UNPAIRED_END_UNCERTAINTY: i32,
 
-    /// Make the end location of single end read be significant when considering duplicates, 
+    /// Make the end location of single end read be significant when considering duplicates,
     /// in addition to the start location, which is always significant (i.e. require single-ended reads to start and
-    /// end on the same position to be considered duplicate) 
+    /// end on the same position to be considered duplicate)
     /// (for this argument, \"read end\" means 3' end).
-    #[arg(long = "USE_END_IN_UNPAIRED_READS", value_name = "bool", default_value_t=false)]
+    #[arg(
+        long = "USE_END_IN_UNPAIRED_READS",
+        value_name = "bool",
+        default_value_t = false
+    )]
     pub(crate) USE_END_IN_UNPAIRED_READS: bool,
 
-    /// This number, plus the maximum RAM available to the JVM, determine the memory footprint used by 
+    /// This number, plus the maximum RAM available to the JVM, determine the memory footprint used by
     /// some of the sorting collections.  If you are running out of memory, try reducing this number.
-    #[arg(long = "SORTING_COLLECTION_SIZE_RATIO", value_name = "f64", default_value_t=0.25)]
+    #[arg(
+        long = "SORTING_COLLECTION_SIZE_RATIO",
+        value_name = "f64",
+        default_value_t = 0.25
+    )]
     pub(crate) SORTING_COLLECTION_SIZE_RATIO: f64,
 
     /// One or more directories with space available to be used by this program for temporary storage of working files
-    #[arg(long = "TMP_DIR", value_name = "Vec<PathBuf>", default_value="[]")]
+    #[arg(long = "TMP_DIR", value_name = "Vec<PathBuf>", default_values  = [std::env::temp_dir().into_os_string()])]
     pub(crate) TMP_DIR: Vec<PathBuf>,
 
     /// Logging level.
     #[arg(long = "LOGGING_LEVEL", value_name = "LevelFilter", default_value_t=LevelFilter::Info)]
     pub(crate) LOGGING_LEVEL: LevelFilter,
 
+    /// If a read appears in a duplicate set, add two tags. The first tag, DUPLICATE_SET_SIZE_TAG (DS), 
+    /// indicates the size of the duplicate set. The smallest possible DS value is 2 which occurs when two
+    /// reads map to the same portion of the reference only one of which is marked as duplicate. The second
+    /// tag, DUPLICATE_SET_INDEX_TAG (DI), represents a unique identifier for the duplicate set to which the
+    /// record belongs. This identifier is the index-in-file of the representative read that was selected out
+    /// of the duplicate set.
+    #[arg(long = "TAG_DUPLICATE_SET_MEMBERS", value_name = "bool", default_value_t=false)]
+    pub(crate) TAG_DUPLICATE_SET_MEMBERS: bool,
 
+    /// Max memory to use. 
+    /// This option is not in Java MarkDuplicates but is here to handle java's `Runtime.getRuntime().maxMemory()` code.
+    #[arg(long = "MAX_MEMORY", value_name = "usize", default_value_t=usize::MAX)]
+    pub(crate) MAX_MEMORY: usize,
 }

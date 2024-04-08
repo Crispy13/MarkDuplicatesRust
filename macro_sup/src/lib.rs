@@ -41,7 +41,7 @@ fn make_mlog_mod(minput: &MInput) -> TokenStream {
 fn define_log_macro(minput: &MInput, level: &str) -> TokenStream {
     let level = syn::Ident::new(level, Span::call_site());
     let target = &minput.target;
-   
+
     let macro_ident = if level == WARN {
         syn::Ident::new("warns", Span::call_site())
     } else {

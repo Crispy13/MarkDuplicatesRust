@@ -49,6 +49,7 @@ where
 #[allow(non_snake_case)]
 #[derive(Deserialize, Debug)]
 pub(crate) struct JavaMDReadEnds {
+    qname: String,
     score: i16,
     read1IndexInFile: i64,
     read2IndexInFile: i64,
@@ -85,6 +86,7 @@ pub(crate) fn from_java_read_ends(jmd: JavaMDReadEnds) -> ReadEndsForMarkDuplica
     read_ends.pls.y = jmd.y;
 
     let read_ends_for_md = ReadEndsForMarkDuplicates {
+        read1_qname:jmd.qname,
         score: jmd.score,
         read1_index_in_file: jmd.read1IndexInFile,
         read2_index_in_file: jmd.read2IndexInFile,

@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 
-use rust_htslib::bam::{record::{RecordExt, SAMReadGroupRecord}, HeaderView, Record};
+use rust_htslib::bam::{
+    record::{RecordExt, SAMReadGroupRecord},
+    HeaderView, Record,
+};
 
 // type Error = Box<dyn std::error::Error + Send + Sync>;
 use anyhow::Error;
@@ -14,8 +17,8 @@ impl LibraryIdGenerator {
 
     pub(crate) fn new() -> Self {
         Self {
-            library_ids:HashMap::new(),
-            next_library_id:1,
+            library_ids: HashMap::new(),
+            next_library_id: 1,
         }
     }
 

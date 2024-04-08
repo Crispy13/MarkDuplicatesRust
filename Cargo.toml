@@ -10,7 +10,7 @@ edition = "2021"
 anyhow = "1.0.81"
 bincode = "1.3.3"
 bio-types = "1.0.1"
-clap = { version = "4.5.3", features = ["derive"] }
+clap = { version = "4.5.3", features = ["derive", "string"] }
 log = "0.4.21"
 log4rs = "1.3.0"
 lru = "0.12.3"

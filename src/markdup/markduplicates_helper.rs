@@ -1,10 +1,11 @@
+use macro_sup::set_mlog;
 use rust_htslib::bam::{
     ext::BamRecordExtensions,
     record::{Aux, RecordExt},
     HeaderView, Record,
 };
 
-use crate::{hts::duplicate_scoring_strategy::DuplicateScoringStrategy, utils::hash_code};
+use crate::{hts::duplicate_scoring_strategy::DuplicateScoringStrategy, markdup::markduplicates::MarkDuplicatesExt, utils::hash_code};
 
 use super::{
     markduplicates::MarkDuplicates,
@@ -16,6 +17,8 @@ use super::{
     },
 };
 use anyhow::{anyhow, Error};
+
+set_mlog!(stringify!(MarkDuplicatesHelper));
 
 pub(crate) enum MarkDuplicatesHelper {
     MarkDuplicatesHelper,
@@ -52,9 +55,9 @@ impl MarkDuplicatesHelper {
 
         read_ends.read1_reference_index = rec.tid();
         read_ends.read1_coordinate = if rec.is_reverse() {
-            rec.reference_end() as i32
+            rec.get_unclipped_end() as i32
         } else {
-            rec.reference_start() as i32 + 1 // +1 to convert it into 1-based.
+            rec.get_unclipped_start() as i32 + 1 // +1 to convert it into 1-based.
         };
 
         read_ends.orientation = if rec.is_reverse() {
@@ -136,6 +139,8 @@ impl MarkDuplicatesHelper {
 
             read_ends_for_md.barcode_data = Some(barcode_data);
         }
+
+        read_ends_for_md.read1_qname = std::str::from_utf8(rec.qname()).unwrap().to_string();
 
         Ok(read_ends_for_md)
     }
@@ -407,13 +412,41 @@ impl MarkDuplicatesHelper {
             }
             MarkDuplicatesHelper::MarkDuplicatesForFlowHelper => {
                 if md.cli.FLOW_QUALITY_SUM_STRATEGY {
-                    Self::compute_flow_duplicate_score(md, rec, paired_ends.read_ends.read2_coordinate)
+                    Self::compute_flow_duplicate_score(
+                        md,
+                        rec,
+                        paired_ends.read_ends.read2_coordinate,
+                    )
                 } else {
                     md.get_read_duplicate_score(rec, paired_ends)
                 }
-            },
+            }
         }
     }
+
+    fn generate_duplicate_indexes(
+        &self,
+        md: &mut MarkDuplicates,
+        use_barcode: bool,
+        index_optical_duplicates: bool,
+    ) {
+        md.sort_indices_for_duplicates(index_optical_duplicates);
+
+        let next_chunk:Vec<ReadEndsForMarkDuplicates> = Vec::with_capacity(200);
+
+        // First just do the pairs
+        mlog::info!("Traversing read pair information and detecting duplicates.");
+
+        // let mut first_of_next_chunk = None;
+        // for next in md.pair_sort.iter().unwrap() {
+        //     if let Some(prev) = first_of_next_chunk.and_then(|prev| {
+        //         Some(MarkDuplicates::are_comparable_for_duplicates(prev, &next, false, use_barcodes))
+        //     })
+            
+        // }
+    }
+
+
 }
 
 struct FlowOrder {

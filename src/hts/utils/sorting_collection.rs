@@ -15,6 +15,7 @@ use tempfile::{tempfile, NamedTempFile, TempPath};
 
 use crate::{
     hts::utils::save_as_byte_to_file,
+    markdup::utils::read_ends_for_mark_duplicates::ReadEndsForMarkDuplicates,
     utils::{get_allocated_and_resident_mem_of_app, human_readable_byte_count, mem_stats},
 };
 
@@ -33,6 +34,7 @@ use super::load_byte_file_as_obj;
  * If Snappy DLL is available and snappy.disable system property is not set to true, then Snappy is used
  * to compress temporary files.
  */
+#[derive(Default)]
 pub(crate) struct SortingCollection<T> {
     /**
      * Directories where files of sorted records go.
@@ -127,18 +129,28 @@ where
         Ok(())
     }
 
-    /**
-     * Sort the records in memory, write them to a file, and clear the buffer of records in memory.
-     */
+    ///
+    /// Sort the records in memory, write them to a file, and clear the buffer of records in memory.
+    ///
+    /// # Errors
+    /// - failed to create temp file.
+    /// - failed to save as byte to file
+    ///
+    ///
     fn spill_to_disk(&mut self) -> Result<(), Error> {
         self.ram_records.get_mut(0..self.num_records_in_ram).unwrap_or_else(|| {
             panic!("Code error. Failed to get slice of `ram_records` with index 0..self.num_records_in_ram.");
         }).sort();
 
-        let mut f = tempfile::Builder::new().prefix(".markdup_rust").tempfile()?;
+        let mut f = tempfile::Builder::new()
+            .prefix("sortingcollection.")
+            .suffix(".tmp")
+            .tempfile_in(self.tmp_dirs.first().unwrap())?;
 
         let mut buf_writer = BufWriter::new(f.as_file_mut());
 
+        // Not in original java code.
+        // write number of records to the front of the file.
         save_as_byte_to_file(&self.num_records_in_ram, &mut buf_writer)?;
 
         self.ram_records

@@ -6,9 +6,10 @@ use std::{
     mem::size_of,
 };
 
+pub(crate) mod file_append_stream_lru_cache;
 pub(crate) mod murmur3;
 pub(crate) mod sorting_collection;
-pub(crate) mod file_append_stream_lru_cache;
+pub(crate) mod sorting_long_collection;
 
 pub(crate) fn save_as_byte_to_file<T: Serialize>(
     value: &T,
@@ -35,8 +36,8 @@ pub(crate) fn load_byte_file_as_obj_v1<T: for<'de> Deserialize<'de>>(
 
     if byte_buf.len() != size_t {
         Err(crate::utils::errors::Error::FailedDeserializeFromByteFile {
-            eb:size_t,
-            rb:byte_buf.len(),
+            eb: size_t,
+            rb: byte_buf.len(),
             input_file: String::new(),
         })?
     }

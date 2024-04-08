@@ -84,8 +84,6 @@ where
     }
 }
 
-
-
 /// Do the same process as `self.get_output_stream_for_sequence()` call.
 ///
 /// Just made this for satisfying borrow checker.
