@@ -453,21 +453,21 @@ impl MarkDuplicatesHelper {
             next_chunk.push(v);
             first_of_next_chunk = next_chunk.last().unwrap();
 
-            pair_sort_iter.for_each(|next| {
-                if MarkDuplicates::are_comparable_for_duplicates(
-                    &first_of_next_chunk,
-                    &next,
-                    true,
-                    use_barcodes,
-                ) {
-                    next_chunk.push(next);
-                } else {
-                    md.handle_chunk(next_chunk);
-                    next_chunk.clear();
-                    next_chunk.push(next);
-                    first_of_next_chunk = next_chunk.last().unwrap();
-                }
-            })
+            // pair_sort_iter.for_each(|next| {
+            //     if MarkDuplicates::are_comparable_for_duplicates(
+            //         &first_of_next_chunk,
+            //         &next,
+            //         true,
+            //         use_barcodes,
+            //     ) {
+            //         next_chunk.push(next);
+            //     } else {
+            //         md.handle_chunk(next_chunk);
+            //         next_chunk.clear();
+            //         next_chunk.push(next);
+            //         first_of_next_chunk = next_chunk.last().unwrap();
+            //     }
+            // })
         }
 
         

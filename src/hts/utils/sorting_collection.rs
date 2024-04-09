@@ -279,7 +279,7 @@ where
     }
 }
 
-impl<'a, B> Deref for CowForSC<'a, B>
+impl<B> Deref for CowForSC<'_, B>
 where
     B: ?Sized + ToOwned,
     B::Owned: Borrow<B>,
@@ -288,7 +288,7 @@ where
 
     fn deref(&self) -> &Self::Target {
     
-        match self {
+        match *self {
             CowForSC::Borrowed(v) => v,
             CowForSC::Owned(ref v) => v.borrow(),
         }
@@ -366,7 +366,7 @@ impl<T: for<'de> Deserialize<'de>, R: Read> Iterator for FileRecordIterator<R, T
     }
 }
 
-struct PeekFileRecordIterator<R, T>
+pub(crate) struct PeekFileRecordIterator<R, T>
 where
     T: for<'de> Deserialize<'de>,
     R: Read,
@@ -422,6 +422,9 @@ where
         self.peeked.get_or_insert_with(|| iter.next()).as_ref()
     }
 
+    /// get peeked item.
+    /// 
+    /// It's the first item of the file in this iterator.
     pub(crate) fn peeked(&self) -> Option<&T> {
         self.peeked.as_ref().unwrap().as_ref()
     }
@@ -432,7 +435,7 @@ where
     T: for<'de> Deserialize<'de>,
     R: Read,
 {
-    queue: BTreeSet<PeekFileRecordIterator<R, T>>,
+    pub(crate) queue: BTreeSet<PeekFileRecordIterator<R, T>>,
 }
 
 impl<R, T> Ord for PeekFileRecordIterator<R, T>

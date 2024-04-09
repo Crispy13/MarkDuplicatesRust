@@ -1,6 +1,6 @@
 use std::{io::Write, path::PathBuf, sync::OnceLock};
 
-use tempfile::NamedTempFile;
+use tempfile::{NamedTempFile, TempPath};
 
 use crate::hts::utils::save_as_byte_to_file;
 
@@ -11,7 +11,7 @@ pub(crate) struct SortingLongCollection {
     ram_values: Vec<i64>,
     num_values_in_ram: usize,
 
-    files: Vec<NamedTempFile>,
+    files: Vec<TempPath>,
 
     done_adding: bool,
 }
@@ -77,10 +77,10 @@ impl SortingLongCollection {
             save_as_byte_to_file(&value, os).unwrap();
         }
 
-        os.flush();
+        os.flush().unwrap();
 
         self.num_values_in_ram = 0;
-        self.files.push(f);
+        self.files.push(f.into_temp_path());
 
     }
 }

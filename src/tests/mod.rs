@@ -27,7 +27,8 @@ pub(crate) trait ToJsonFileForTest {
 
 impl<I> ToJsonFileForTest for I
 where
-    I: Iterator<Item = ReadEndsForMarkDuplicates>,
+    I: Iterator,
+    <I as Iterator>::Item: Serialize,
 {
     fn save_object_to_json(self, path: impl AsRef<Path>) {
         let pf = serde_json::ser::PrettyFormatter::with_indent(b"    ");
@@ -45,6 +46,9 @@ where
         // self.iter().for_each(|re| {re.serialize(&mut ser).unwrap();});
     }
 }
+
+
+
 
 #[allow(non_snake_case)]
 #[derive(Deserialize, Debug)]

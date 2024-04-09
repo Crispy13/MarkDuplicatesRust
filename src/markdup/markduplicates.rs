@@ -320,6 +320,8 @@ impl MarkDuplicates {
                                 .get_read_duplicate_score(self, &rec, &paired_ends);
                         self.pair_sort.add(paired_ends)?;
                     }
+                } else {
+                    self.frag_sort.add(fragment_end)?;
                 }
             }
 
@@ -503,7 +505,7 @@ impl MarkDuplicatesExt for MarkDuplicates {}
 
 #[cfg(test)]
 mod test {
-    use std::path::Path;
+    use std::{borrow::Cow, path::Path};
 
     use clap::Parser;
 
@@ -533,16 +535,29 @@ mod test {
 
         let mut ps = md.pair_sort.iter().unwrap();
         let fs = md.frag_sort.iter().unwrap();
-        // println!("ps_item={:#?}", ps.next().unwrap());
 
+        // let fs_queue_order_path = format!(
+        //     "{}.frag_sort.queue.rust.json",
+        //     bam_path.file_stem().unwrap().to_str().unwrap()
+        // );
+        // match fs {
+        //     crate::hts::utils::sorting_collection::SortingCollectionIter::InMemoryIter(_) => {}
+        //     crate::hts::utils::sorting_collection::SortingCollectionIter::MergingIterator(ref v) => {
+        //         v.queue
+        //             .iter()
+        //             .map(|e| e.peeked().unwrap())
+        //             .save_object_to_json(&fs_queue_order_path);
+        //     }
+        // }
+        // println!("ps_item={:#?}", ps.next().unwrap());
         // println!("pair_sort(N={})={:#?}", ps.len(), ps);
         // println!("frag_sort(N={})={:#?}", fs.len(), fs);
 
         // let ps_json_path = format!("{}.pair_sort.rust.json", bam_path.file_stem().unwrap().to_str().unwrap());
         // let fs_json_path = format!("{}.frag_sort.rust.json", bam_path.file_stem().unwrap().to_str().unwrap());
         // ps.save_object_to_json(&ps_json_path);
-        // fs.save_object_to_json(&fs_json_path);
-
+        // fs.map(|e| e.into_owned()).take(2000).save_object_to_json(&fs_json_path);
+        
         // println!("ps_json_path={}\nfs_json_pat={}", ps_json_path, fs_json_path)
 
         // JavaReadEndIterator::new(format!("{}.pairSort.java.json", bam_path.to_str().unwrap()))
@@ -553,6 +568,7 @@ mod test {
         //         assert_eq!(j, r, ">> i={}\njava={:#?}\n\nrust={:#?}", i, j, r);
         //     });
 
+        // let fs = md.frag_sort.iter().unwrap();
         JavaReadEndIterator::new(format!("{}.fragSort.java.json", bam_path.to_str().unwrap()))
             .map(from_java_read_ends)
             .zip(fs)
