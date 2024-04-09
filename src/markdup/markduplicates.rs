@@ -15,7 +15,8 @@ use crate::{
     hts::{
         duplicate_scoring_strategy::{DuplicateScoringStrategy, ScoringStrategy},
         utils::{
-            sorting_collection::SortingCollection, sorting_long_collection::SortingLongCollection,
+            sorting_collection::{CowForSC, SortingCollection},
+            sorting_long_collection::SortingLongCollection,
         },
         SAMTag, SortOrder,
     },
@@ -67,6 +68,8 @@ pub(crate) struct MarkDuplicates {
     optical_duplicate_indexes: SortingLongCollection,
 
     representative_read_indices_for_duplicates: SortingCollection<RepresentativeReadIndexer>,
+
+    num_duplicate_indices: usize,
 }
 
 impl MarkDuplicates {
@@ -90,7 +93,7 @@ impl MarkDuplicates {
             duplicate_indexes: Default::default(),
             optical_duplicate_indexes: Default::default(),
             representative_read_indices_for_duplicates: Default::default(),
-            
+            num_duplicate_indices: 0,
         }
     }
 
@@ -437,6 +440,27 @@ impl MarkDuplicates {
         }
     }
 
+    pub(crate) fn handle_chunk(&mut self, next_chunk: Vec<CowForSC<ReadEndsForMarkDuplicates>>) {
+        if next_chunk.len() > 1 {
+            self.mark_duplicate_pairs(next_chunk);
+        }
+        todo!()
+    }
+
+    /**
+     * Takes a list of ReadEndsForMarkDuplicates objects and removes from it all
+     * objects that should
+     * not be marked as duplicates. This assumes that the list contains objects
+     * representing pairs.
+     */
+    fn mark_duplicate_pairs(&mut self, read_end_list: Vec<CowForSC<ReadEndsForMarkDuplicates>>) {
+        todo!()
+    }
+
+    fn add_index_as_duplicate(&mut self, bam_index: i64) {
+        self.duplicate_indexes.add(bam_index);
+        self.num_duplicate_indices += 1;
+    }
 }
 
 pub(super) trait MarkDuplicatesExt {
@@ -475,9 +499,7 @@ pub(super) trait MarkDuplicatesExt {
     }
 }
 
-impl MarkDuplicatesExt for MarkDuplicates {
-
-}
+impl MarkDuplicatesExt for MarkDuplicates {}
 
 #[cfg(test)]
 mod test {
@@ -523,21 +545,21 @@ mod test {
 
         // println!("ps_json_path={}\nfs_json_pat={}", ps_json_path, fs_json_path)
 
-        JavaReadEndIterator::new(format!("{}.pairSort.java.json", bam_path.to_str().unwrap()))
-            .map(from_java_read_ends)
-            .zip(ps)
-            .enumerate()
-            .for_each(|(i, (j, r))| {
-                assert_eq!(j, r, ">> i={}\njava={:#?}\n\nrust={:#?}", i, j, r);
-            });
-
-        // JavaReadEndIterator::new(format!("{}.fragSort.java.json", bam_path.to_str().unwrap()))
+        // JavaReadEndIterator::new(format!("{}.pairSort.java.json", bam_path.to_str().unwrap()))
         //     .map(from_java_read_ends)
-        //     .zip(fs)
+        //     .zip(ps)
         //     .enumerate()
-        //     .for_each(|( i, (j, r))|{
+        //     .for_each(|(i, (j, r))| {
         //         assert_eq!(j, r, ">> i={}\njava={:#?}\n\nrust={:#?}", i, j, r);
         //     });
+
+        JavaReadEndIterator::new(format!("{}.fragSort.java.json", bam_path.to_str().unwrap()))
+            .map(from_java_read_ends)
+            .zip(fs)
+            .enumerate()
+            .for_each(|(i, (j, r))| {
+                assert_eq!(j, *r, ">> i={}\njava={:#?}\n\nrust={:#?}", i, j, r);
+            });
         // assert_eq!(ps, from_java_read_ends_to_rust_read_ends("tests/data/NA12878.chrom11.20.bam.20.pairSort.read.ends"));
         // assert_eq!(fs, from_java_read_ends_to_rust_read_ends("tests/data/NA12878.chrom11.20.bam.20.fragSort.read.ends"));
     }

@@ -5,7 +5,13 @@ use rust_htslib::bam::{
     HeaderView, Record,
 };
 
-use crate::{hts::duplicate_scoring_strategy::DuplicateScoringStrategy, markdup::markduplicates::MarkDuplicatesExt, utils::hash_code};
+use crate::{
+    hts::{
+        duplicate_scoring_strategy::DuplicateScoringStrategy, utils::sorting_collection::CowForSC,
+    },
+    markdup::markduplicates::MarkDuplicatesExt,
+    utils::hash_code,
+};
 
 use super::{
     markduplicates::MarkDuplicates,
@@ -427,26 +433,45 @@ impl MarkDuplicatesHelper {
     fn generate_duplicate_indexes(
         &self,
         md: &mut MarkDuplicates,
-        use_barcode: bool,
+        use_barcodes: bool,
         index_optical_duplicates: bool,
     ) {
         md.sort_indices_for_duplicates(index_optical_duplicates);
 
-        let next_chunk:Vec<ReadEndsForMarkDuplicates> = Vec::with_capacity(200);
+        let mut next_chunk: Vec<CowForSC<ReadEndsForMarkDuplicates>> = Vec::with_capacity(200);
 
         // First just do the pairs
         mlog::info!("Traversing read pair information and detecting duplicates.");
 
-        // let mut first_of_next_chunk = None;
-        // for next in md.pair_sort.iter().unwrap() {
-        //     if let Some(prev) = first_of_next_chunk.and_then(|prev| {
-        //         Some(MarkDuplicates::are_comparable_for_duplicates(prev, &next, false, use_barcodes))
-        //     })
-            
-        // }
+        let mut first_of_next_chunk;
+
+        let mut pair_sort_iter = md.pair_sort.iter().unwrap();
+
+        if let Some(v) = pair_sort_iter.next() {
+            // first_of_next_chunk = v;
+
+            next_chunk.push(v);
+            first_of_next_chunk = next_chunk.last().unwrap();
+
+            pair_sort_iter.for_each(|next| {
+                if MarkDuplicates::are_comparable_for_duplicates(
+                    &first_of_next_chunk,
+                    &next,
+                    true,
+                    use_barcodes,
+                ) {
+                    next_chunk.push(next);
+                } else {
+                    md.handle_chunk(next_chunk);
+                    next_chunk.clear();
+                    next_chunk.push(next);
+                    first_of_next_chunk = next_chunk.last().unwrap();
+                }
+            })
+        }
+
+        
     }
-
-
 }
 
 struct FlowOrder {

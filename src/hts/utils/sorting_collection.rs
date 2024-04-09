@@ -1,12 +1,5 @@
 use std::{
-    collections::{BTreeSet, HashSet},
-    fs::File,
-    io::{BufReader, BufWriter, Read},
-    iter::Peekable,
-    marker::PhantomData,
-    mem::size_of,
-    ops::{Deref, DerefMut},
-    path::PathBuf,
+    borrow::Borrow, collections::{BTreeSet, HashSet}, fmt, fs::File, io::{BufReader, BufWriter, Read}, iter::Peekable, marker::PhantomData, mem::size_of, ops::{Deref, DerefMut}, path::PathBuf
 };
 
 use anyhow::Error;
@@ -216,12 +209,13 @@ where
         }
     }
 
-    fn in_memory_iter(&mut self) -> std::vec::Drain<'_, T> {
+    fn in_memory_iter(&mut self) -> std::slice::Iter<'_, T> {
         self.ram_records.get_mut(0..self.num_records_in_ram).unwrap_or_else(|| {
             panic!("Code error. Failed to get slice of `ram_records` with index 0..self.num_records_in_ram.");
         }).sort();
 
-        self.ram_records.drain(..self.num_records_in_ram)
+        // self.ram_records.drain(..self.num_records_in_ram)
+        self.ram_records.iter()
     }
 }
 
@@ -229,21 +223,89 @@ pub(crate) enum SortingCollectionIter<'a, T>
 where
     T: for<'de> Deserialize<'de>,
 {
-    InMemoryIter(std::vec::Drain<'a, T>),
+    InMemoryIter(std::slice::Iter<'a, T>),
     MergingIterator(MergingIterator<BufReader<File>, T>),
+}
+
+pub(crate) enum CowForSC<'a, B: ?Sized + 'a>
+where
+    B: ToOwned,
+{
+    /// Borrowed data.
+    Borrowed(&'a B),
+
+    /// Owned Data
+    Owned(<B as ToOwned>::Owned),
+}
+
+impl<B: ?Sized + ToOwned> Clone for CowForSC<'_, B> {
+    fn clone(&self) -> Self {
+        match *self {
+            CowForSC::Borrowed(b) => CowForSC::Borrowed(b),
+            CowForSC::Owned(ref o) => {
+                let b: &B = o.borrow();
+                CowForSC::Owned(b.to_owned())
+            }
+        }
+    }
+
+    fn clone_from(&mut self, source: &Self) {
+        match (self, source) {
+            (&mut CowForSC::Owned(ref mut dest), &CowForSC::Owned(ref o)) => o.borrow().clone_into(dest),
+            (t, s) => *t = s.clone(),
+        }
+    }
+}
+
+impl<B: ?Sized + ToOwned> CowForSC<'_, B> {
+    pub fn into_owned(self) -> <B as ToOwned>::Owned {
+        match self {
+            CowForSC::Borrowed(v) => v.to_owned(),
+            CowForSC::Owned(v) => v,
+        }
+    }
+}
+
+impl<'a, B> fmt::Debug for CowForSC<'a, B> 
+where
+    B: fmt::Debug + ToOwned,
+    <B as ToOwned>::Owned: fmt::Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            CowForSC::Borrowed(v) => v.fmt(f),
+            CowForSC::Owned(ref v) => v.fmt(f),
+        }
+    }
+}
+
+impl<'a, B> Deref for CowForSC<'a, B>
+where
+    B: ?Sized + ToOwned,
+    B::Owned: Borrow<B>,
+{
+    type Target = B;
+
+    fn deref(&self) -> &Self::Target {
+    
+        match self {
+            CowForSC::Borrowed(v) => v,
+            CowForSC::Owned(ref v) => v.borrow(),
+        }
+    }
 }
 
 impl<'a, T> Iterator for SortingCollectionIter<'a, T>
 where
-    T: for<'de> Deserialize<'de>,
+    T: for<'de> Deserialize<'de> + ToOwned<Owned = T>,
     PeekFileRecordIterator<BufReader<File>, T>: Ord,
 {
-    type Item = T;
+    type Item = CowForSC<'a, T>;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self {
-            SortingCollectionIter::InMemoryIter(it) => it.next(),
-            SortingCollectionIter::MergingIterator(it) => it.next(),
+            SortingCollectionIter::InMemoryIter(it) => it.next().map(CowForSC::Borrowed),
+            SortingCollectionIter::MergingIterator(it) => it.next().map(CowForSC::Owned),
         }
     }
 }

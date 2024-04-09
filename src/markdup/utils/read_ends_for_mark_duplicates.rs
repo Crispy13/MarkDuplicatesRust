@@ -1,5 +1,5 @@
 use core::fmt;
-use std::cmp::Ordering;
+use std::{cmp::Ordering, ops::Deref};
 
 use rust_htslib::bam::{self, ext::BamRecordExtensions, HeaderView, Record};
 use serde::{Deserialize, Serialize};
@@ -242,9 +242,9 @@ impl Ord for ReadEndsForMarkDuplicates {
 }
 
 
-pub(crate) enum ReadEndsForMarkDuplicatesCow<'a> {
-    /// Borrowed data.
-    Borrowed(&'a ReadEndsForMarkDuplicates),
 
-    
-}
+
+
+
+
+// std::borrow::Cow;
