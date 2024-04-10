@@ -189,7 +189,7 @@ impl ProgressLogger {
         let rn_info = if !self.last_read_name.is_empty() && self.count_non_increasing > 1000 {
             format!(".  Last read name: {}", self.last_read_name)
         } else {
-            "".to_string()
+            String::new()
         };
 
         let n = if self.processed % self.n == 0 {
@@ -209,6 +209,10 @@ impl ProgressLogger {
             read_info,
             rn_info
         );
+    }
+
+    pub(crate) fn record_with_chrom_pos(&mut self, chrom: &str, pos: i64) {
+        self.check_and_then_record(chrom, pos, "");
     }
 
     fn _record(&self, chrom: impl fmt::Display, pos: i32) {

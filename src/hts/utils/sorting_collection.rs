@@ -1,5 +1,14 @@
 use std::{
-    borrow::Borrow, collections::{BTreeSet, HashSet}, fmt, fs::File, io::{BufReader, BufWriter, Read}, iter::Peekable, marker::PhantomData, mem::size_of, ops::{Deref, DerefMut}, path::PathBuf
+    borrow::Borrow,
+    collections::{BTreeSet, HashSet},
+    fmt,
+    fs::File,
+    io::{BufReader, BufWriter, Read},
+    iter::Peekable,
+    marker::PhantomData,
+    mem::size_of,
+    ops::{Deref, DerefMut},
+    path::PathBuf,
 };
 
 use anyhow::Error;
@@ -251,7 +260,9 @@ impl<B: ?Sized + ToOwned> Clone for CowForSC<'_, B> {
 
     fn clone_from(&mut self, source: &Self) {
         match (self, source) {
-            (&mut CowForSC::Owned(ref mut dest), &CowForSC::Owned(ref o)) => o.borrow().clone_into(dest),
+            (&mut CowForSC::Owned(ref mut dest), &CowForSC::Owned(ref o)) => {
+                o.borrow().clone_into(dest)
+            }
             (t, s) => *t = s.clone(),
         }
     }
@@ -266,7 +277,7 @@ impl<B: ?Sized + ToOwned> CowForSC<'_, B> {
     }
 }
 
-impl<'a, B> fmt::Debug for CowForSC<'a, B> 
+impl<'a, B> fmt::Debug for CowForSC<'a, B>
 where
     B: fmt::Debug + ToOwned,
     <B as ToOwned>::Owned: fmt::Debug,
@@ -287,7 +298,6 @@ where
     type Target = B;
 
     fn deref(&self) -> &Self::Target {
-    
         match *self {
             CowForSC::Borrowed(v) => v,
             CowForSC::Owned(ref v) => v.borrow(),
@@ -423,7 +433,7 @@ where
     }
 
     /// get peeked item.
-    /// 
+    ///
     /// It's the first item of the file in this iterator.
     pub(crate) fn peeked(&self) -> Option<&T> {
         self.peeked.as_ref().unwrap().as_ref()

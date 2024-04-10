@@ -1,4 +1,5 @@
 pub(crate) mod errors;
+pub(crate) mod graph_utils;
 pub(crate) mod logging;
 
 use tikv_jemalloc_ctl;

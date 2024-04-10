@@ -36,8 +36,6 @@ impl SortingLongCollection {
             tmp_dir,
             ram_values: Vec::with_capacity(max_values_in_ram),
             ..Default::default()
-            
-            
         }
     }
 
@@ -81,7 +79,6 @@ impl SortingLongCollection {
 
         self.num_values_in_ram = 0;
         self.files.push(f.into_temp_path());
-
     }
 }
 
@@ -94,7 +91,6 @@ impl Default for SortingLongCollection {
             num_values_in_ram: 0,
             files: Vec::new(),
             done_adding: false,
-            
         }
     }
 }

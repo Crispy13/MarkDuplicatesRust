@@ -8,8 +8,10 @@ static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 mod cmdline;
 mod hts;
 mod markdup;
-mod tests;
 mod utils;
+
+#[cfg(test)]
+mod tests;
 
 fn main() {
     let cli = Cli::parse();

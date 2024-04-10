@@ -7,6 +7,7 @@ use std::{
 };
 
 pub(crate) mod file_append_stream_lru_cache;
+pub(crate) mod histogram;
 pub(crate) mod murmur3;
 pub(crate) mod sorting_collection;
 pub(crate) mod sorting_long_collection;

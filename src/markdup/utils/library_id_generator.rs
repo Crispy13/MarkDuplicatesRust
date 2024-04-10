@@ -7,9 +7,15 @@ use rust_htslib::bam::{
 
 // type Error = Box<dyn std::error::Error + Send + Sync>;
 use anyhow::Error;
+
+use crate::hts::utils::histogram::{f64H, Histogram};
 pub(crate) struct LibraryIdGenerator {
     library_ids: HashMap<String, i16>, // from library string to library id
     next_library_id: i16,
+    optical_duplicates_by_library_id: Histogram<i16>,
+    pub(crate) duplicate_count_hist: Histogram<f64H>,
+    pub(crate) non_optical_duplicate_count_hist: Histogram<f64H>,
+    pub(crate) optical_duplicate_count_hist: Histogram<f64H>,
 }
 
 impl LibraryIdGenerator {
@@ -19,6 +25,13 @@ impl LibraryIdGenerator {
         Self {
             library_ids: HashMap::new(),
             next_library_id: 1,
+            optical_duplicates_by_library_id: Histogram::new(),
+            duplicate_count_hist: Histogram::from_labels("set_size", "all_sets"),
+            non_optical_duplicate_count_hist: Histogram::from_labels(
+                "set_size",
+                "non_optical_sets",
+            ),
+            optical_duplicate_count_hist: Histogram::from_labels("set_size", "optical_sets"),
         }
     }
 
@@ -54,6 +67,22 @@ impl LibraryIdGenerator {
             Some(lb) => Ok(lb),
             None => Ok(Self::UNKNOWN_LIBRARY),
         }
+    }
+
+    pub(crate) fn get_optical_duplicates_by_library_id_map(&mut self) -> &mut Histogram<i16> {
+        &mut self.optical_duplicates_by_library_id
+    }
+
+    pub(crate) fn get_non_optical_duplicate_count_hist(&mut self) -> &mut Histogram<f64H> {
+        &mut self.non_optical_duplicate_count_hist
+    }
+
+    pub(crate) fn get_optical_duplicate_count_hist(&mut self) -> &mut Histogram<f64H> {
+        &mut self.optical_duplicate_count_hist
+    }
+
+    pub(crate) fn get_duplicate_count_hist(&mut self) -> &mut Histogram<f64H> {
+        &mut self.duplicate_count_hist
     }
 }
 

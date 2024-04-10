@@ -164,16 +164,20 @@ pub(crate) struct Cli {
     #[arg(long = "LOGGING_LEVEL", value_name = "LevelFilter", default_value_t=LevelFilter::Info)]
     pub(crate) LOGGING_LEVEL: LevelFilter,
 
-    /// If a read appears in a duplicate set, add two tags. The first tag, DUPLICATE_SET_SIZE_TAG (DS), 
+    /// If a read appears in a duplicate set, add two tags. The first tag, DUPLICATE_SET_SIZE_TAG (DS),
     /// indicates the size of the duplicate set. The smallest possible DS value is 2 which occurs when two
     /// reads map to the same portion of the reference only one of which is marked as duplicate. The second
     /// tag, DUPLICATE_SET_INDEX_TAG (DI), represents a unique identifier for the duplicate set to which the
     /// record belongs. This identifier is the index-in-file of the representative read that was selected out
     /// of the duplicate set.
-    #[arg(long = "TAG_DUPLICATE_SET_MEMBERS", value_name = "bool", default_value_t=false)]
+    #[arg(
+        long = "TAG_DUPLICATE_SET_MEMBERS",
+        value_name = "bool",
+        default_value_t = false
+    )]
     pub(crate) TAG_DUPLICATE_SET_MEMBERS: bool,
 
-    /// Max memory to use. 
+    /// Max memory to use.
     /// This option is not in Java MarkDuplicates but is here to handle java's `Runtime.getRuntime().maxMemory()` code.
     #[arg(long = "MAX_MEMORY", value_name = "usize", default_value_t=usize::MAX)]
     pub(crate) MAX_MEMORY: usize,

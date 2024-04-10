@@ -98,7 +98,7 @@ impl fmt::Display for ReadEndsForMarkDuplicates {
 impl Default for ReadEndsForMarkDuplicates {
     fn default() -> Self {
         Self {
-            read1_qname:String::new(),
+            read1_qname: String::new(),
             score: 0,
             read1_index_in_file: -1,
             read2_index_in_file: -1,
@@ -240,11 +240,5 @@ impl Ord for ReadEndsForMarkDuplicates {
             .unwrap_or_else(|| panic!("impl Ord failed for `ReadEndsForMarkDuplicates`."))
     }
 }
-
-
-
-
-
-
 
 // std::borrow::Cow;

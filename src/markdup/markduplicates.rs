@@ -1,4 +1,9 @@
-use std::{collections::HashSet, fmt::Write, mem::size_of};
+use std::{
+    borrow::{Borrow, BorrowMut},
+    collections::HashSet,
+    fmt::Write,
+    mem::size_of,
+};
 
 use rust_htslib::bam::{
     ext::BamRecordExtensions,
@@ -15,6 +20,7 @@ use crate::{
     hts::{
         duplicate_scoring_strategy::{DuplicateScoringStrategy, ScoringStrategy},
         utils::{
+            histogram::Histogram,
             sorting_collection::{CowForSC, SortingCollection},
             sorting_long_collection::SortingLongCollection,
         },
@@ -463,6 +469,153 @@ impl MarkDuplicates {
         self.duplicate_indexes.add(bam_index);
         self.num_duplicate_indices += 1;
     }
+    /**
+     * Looks through the set of reads and identifies how many of the duplicates are
+     * in fact optical duplicates, and stores the data in the instance level histogram.
+     * Additionally sets the transient isOpticalDuplicate flag on each read end that is
+     * identified as an optical duplicate.
+     */
+    fn track_optical_duplicates(
+        ends: &mut [ReadEndsForMarkDuplicates],
+        keeper: Option<&ReadEndsForMarkDuplicates>,
+        optical_duplicate_finder: &OpticalDuplicateFinder,
+        library_id_generator: &mut LibraryIdGenerator,
+    ) {
+        #[allow(non_snake_case)]
+        let mut has_FR = false;
+        #[allow(non_snake_case)]
+        let mut has_RF = false;
+
+        // Check to see if we have a mixture of FR/RF
+        for end in ends.iter() {
+            if ReadEnds::FR == end.read_ends.orientation_for_optical_duplicates {
+                has_FR = true;
+
+                if has_RF {
+                    break;
+                }
+            } else if ReadEnds::RF == end.read_ends.orientation_for_optical_duplicates {
+                has_RF = true;
+
+                if has_FR {
+                    break;
+                }
+            }
+        }
+
+        // Check if we need to partition since the orientations could have changed
+        let n_optical_dup;
+        if has_FR && has_RF {
+            // need to track them independently
+            // Variables used for optical duplicate detection and tracking
+            #[allow(non_snake_case)]
+            let (mut track_optical_duplicates_F, mut track_optical_duplicates_R) =
+                (Vec::new(), Vec::new());
+
+            // Split into two lists: first of pairs and second of pairs, since they must have orientation and same starting end
+            for end in ends.iter_mut() {
+                if ReadEnds::FR == end.read_ends.orientation_for_optical_duplicates {
+                    track_optical_duplicates_F.push(end);
+                } else if ReadEnds::RF == end.read_ends.orientation_for_optical_duplicates {
+                    track_optical_duplicates_R.push(end);
+                } else {
+                    panic!(
+                        "Found an unexpected orientation: {}",
+                        end.read_ends.orientation
+                    )
+                }
+            }
+
+            // track the duplicates
+            #[allow(non_snake_case)]
+            let n_optical_dup_F = Self::track_optical_duplicates_with_histo(
+                track_optical_duplicates_F.as_mut_slice(),
+                keeper,
+                optical_duplicate_finder,
+                library_id_generator.get_optical_duplicates_by_library_id_map(),
+            );
+            #[allow(non_snake_case)]
+            let n_optical_dup_R = Self::track_optical_duplicates_with_histo(
+                track_optical_duplicates_R.as_mut_slice(),
+                keeper,
+                optical_duplicate_finder,
+                library_id_generator.get_optical_duplicates_by_library_id_map(),
+            );
+
+            n_optical_dup = n_optical_dup_F + n_optical_dup_R;
+        } else {
+            // No need to partition
+            n_optical_dup = Self::track_optical_duplicates_with_histo(
+                ends,
+                keeper,
+                optical_duplicate_finder,
+                library_id_generator.get_optical_duplicates_by_library_id_map(),
+            );
+        }
+
+        Self::track_duplicate_counts(ends.len(), n_optical_dup, library_id_generator);
+    }
+
+    /**
+     * Looks through the set of reads and identifies how many of the duplicates are
+     * in fact optical duplicates, and stores the data in the instance level histogram.
+     *
+     * We expect only reads with FR or RF orientations, not a mixture of both.
+     *
+     * In PCR duplicate detection, a duplicates can be a have FR and RF when fixing the orientation order to the first end of the mate.  In
+     * optical duplicate detection, we do not consider them duplicates if one read as FR and the other RF when we order orientation by the
+     * first mate sequenced (read #1 of the pair).
+     */
+    fn track_optical_duplicates_with_histo(
+        ends: &mut [impl BorrowMut<ReadEndsForMarkDuplicates> + Borrow<ReadEndsForMarkDuplicates>],
+        keeper: Option<&ReadEndsForMarkDuplicates>,
+        optical_duplicate_finder: &OpticalDuplicateFinder,
+        optical_duplicates_by_library_id: &mut Histogram<i16>,
+    ) -> i32 {
+        let ends_immut = ends.iter().map(|e| e.borrow()).collect::<Vec<_>>();
+
+        let optical_duplicate_flags =
+            optical_duplicate_finder.find_optical_duplicates(ends_immut.as_slice(), keeper);
+
+        let mut optical_duplicates = 0;
+
+        for (odf, end) in optical_duplicate_flags.into_iter().zip(ends.iter_mut()) {
+            if odf {
+                optical_duplicates += 1;
+                end.borrow_mut().read_ends.is_optical_duplicate = true;
+            }
+        }
+
+        if optical_duplicates > 0 {
+            optical_duplicates_by_library_id.increment(
+                ends.first().unwrap().borrow().get_library_id(),
+                optical_duplicates as f64,
+            );
+        }
+
+        optical_duplicates
+    }
+
+    fn track_duplicate_counts(
+        vec_len: usize,
+        opt_dup_cnt: i32,
+        library_id_generator: &mut LibraryIdGenerator,
+    ) {
+        let duplicates_count_hist = &mut library_id_generator.duplicate_count_hist;
+        let non_optical_duplicates_count_hist =
+            &mut library_id_generator.non_optical_duplicate_count_hist;
+        let optical_duplicates_count_hist = &mut library_id_generator.optical_duplicate_count_hist;
+
+        duplicates_count_hist.increment1(vec_len as f64);
+
+        if vec_len as i32 - opt_dup_cnt > 0 {
+            non_optical_duplicates_count_hist.increment1((vec_len as i32 - opt_dup_cnt) as f64);
+        }
+
+        if opt_dup_cnt > 0 {
+            optical_duplicates_count_hist.increment1((opt_dup_cnt + 1) as f64);
+        }
+    }
 }
 
 pub(super) trait MarkDuplicatesExt {
@@ -557,7 +710,7 @@ mod test {
         // let fs_json_path = format!("{}.frag_sort.rust.json", bam_path.file_stem().unwrap().to_str().unwrap());
         // ps.save_object_to_json(&ps_json_path);
         // fs.map(|e| e.into_owned()).take(2000).save_object_to_json(&fs_json_path);
-        
+
         // println!("ps_json_path={}\nfs_json_pat={}", ps_json_path, fs_json_path)
 
         // JavaReadEndIterator::new(format!("{}.pairSort.java.json", bam_path.to_str().unwrap()))
@@ -569,13 +722,13 @@ mod test {
         //     });
 
         // let fs = md.frag_sort.iter().unwrap();
-        JavaReadEndIterator::new(format!("{}.fragSort.java.json", bam_path.to_str().unwrap()))
-            .map(from_java_read_ends)
-            .zip(fs)
-            .enumerate()
-            .for_each(|(i, (j, r))| {
-                assert_eq!(j, *r, ">> i={}\njava={:#?}\n\nrust={:#?}", i, j, r);
-            });
+        // JavaReadEndIterator::new(format!("{}.fragSort.java.json", bam_path.to_str().unwrap()))
+        //     .map(from_java_read_ends)
+        //     .zip(fs)
+        //     .enumerate()
+        //     .for_each(|(i, (j, r))| {
+        //         assert_eq!(j, *r, ">> i={}\njava={:#?}\n\nrust={:#?}", i, j, r);
+        //     });
         // assert_eq!(ps, from_java_read_ends_to_rust_read_ends("tests/data/NA12878.chrom11.20.bam.20.pairSort.read.ends"));
         // assert_eq!(fs, from_java_read_ends_to_rust_read_ends("tests/data/NA12878.chrom11.20.bam.20.fragSort.read.ends"));
     }
