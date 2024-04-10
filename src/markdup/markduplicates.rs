@@ -71,7 +71,7 @@ pub(crate) struct MarkDuplicates {
     pub(super) pair_sort: SortingCollection<ReadEndsForMarkDuplicates>,
 
     duplicate_indexes: SortingLongCollection,
-    optical_duplicate_indexes: SortingLongCollection,
+    optical_duplicate_indexes: Option<SortingLongCollection>,
 
     representative_read_indices_for_duplicates: SortingCollection<RepresentativeReadIndexer>,
 
@@ -427,10 +427,10 @@ impl MarkDuplicates {
         if index_optical_duplicates {
             max_in_memory /=
                 ((entry_overhead + SortingLongCollection::SIZEOF) / entry_overhead) as f64;
-            self.optical_duplicate_indexes = SortingLongCollection::new(
+            self.optical_duplicate_indexes = Some(SortingLongCollection::new(
                 max_in_memory as usize,
                 Vec::with_capacity(self.cli.TMP_DIR.len()),
-            );
+            ));
         }
 
         mlog::info!(
@@ -448,9 +448,9 @@ impl MarkDuplicates {
         }
     }
 
-    pub(crate) fn handle_chunk(&mut self, next_chunk: Vec<CowForSC<ReadEndsForMarkDuplicates>>) {
+    pub(crate) fn handle_chunk(&mut self, mut next_chunk: Vec<ReadEndsForMarkDuplicates>) {
         if next_chunk.len() > 1 {
-            self.mark_duplicate_pairs(next_chunk);
+            self.mark_duplicate_pairs(next_chunk.as_mut_slice());
         }
         todo!()
     }
@@ -461,8 +461,63 @@ impl MarkDuplicates {
      * not be marked as duplicates. This assumes that the list contains objects
      * representing pairs.
      */
-    fn mark_duplicate_pairs(&mut self, read_end_list: Vec<CowForSC<ReadEndsForMarkDuplicates>>) {
-        todo!()
+    fn mark_duplicate_pairs(&mut self, mut read_ends_slice: &mut [ReadEndsForMarkDuplicates]) {
+        let mut max_score = 0_i16;
+        let mut best = None;
+
+        // All read ends should have orientation FF, FR, RF, or RR
+        for end in read_ends_slice.iter() {
+            if end.score > max_score || best.is_none() {
+                max_score = end.score;
+                best = Some(end);
+            }
+        }
+
+        let best = best.cloned();
+
+        if !self.cli.READ_NAME_REGEX.is_empty() {
+            Self::track_optical_duplicates(
+                read_ends_slice,
+                best.as_ref(),
+                &self.optical_duplicate_finder,
+                &mut self.library_id_generator,
+            )
+        }
+
+        if best.is_none() {
+            return;
+        }
+
+        let best = best.unwrap();
+        for end in read_ends_slice.iter() {
+            if end != &best {
+                self.add_index_as_duplicate(end.read1_index_in_file);
+            }
+
+            // in query-sorted case, these will be the same.
+            // TODO: also in coordinate sorted, when one read is unmapped
+            if end.read2_index_in_file != end.read1_index_in_file {
+                self.add_index_as_duplicate(end.read2_index_in_file);
+            }
+
+            if let Some((true, odi)) = self
+                .optical_duplicate_indexes
+                .as_mut()
+                .and_then(|v| Some((end.read_ends.is_optical_duplicate, v)))
+            {
+                odi.add(end.read1_index_in_file);
+                // We expect end.read2IndexInFile==read1IndexInFile when we are in queryname
+                // sorted files, as the read-pairs
+                // will be sorted together and nextIndexIfNeeded() will only pull one index from
+                // opticalDuplicateIndexes.
+                // This means that in queryname sorted order we will only pull from the sorting
+                // collection once,
+                // where as we would pull twice for coordinate sorted files.
+                if end.read2_index_in_file != end.read1_index_in_file {
+                    odi.add(end.read2_index_in_file);
+                }
+            }
+        }
     }
 
     fn add_index_as_duplicate(&mut self, bam_index: i64) {
@@ -534,6 +589,7 @@ impl MarkDuplicates {
                 optical_duplicate_finder,
                 library_id_generator.get_optical_duplicates_by_library_id_map(),
             );
+
             #[allow(non_snake_case)]
             let n_optical_dup_R = Self::track_optical_duplicates_with_histo(
                 track_optical_duplicates_R.as_mut_slice(),

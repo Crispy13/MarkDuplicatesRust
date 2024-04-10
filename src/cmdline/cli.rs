@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use clap::{ArgAction, Args, Parser, Subcommand};
 use log::LevelFilter;
 
-use crate::hts::duplicate_scoring_strategy::ScoringStrategy;
+use crate::{hts::duplicate_scoring_strategy::ScoringStrategy, markdup::utils::optical_duplicate_finder::OpticalDuplicateFinder};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -181,4 +181,9 @@ pub(crate) struct Cli {
     /// This option is not in Java MarkDuplicates but is here to handle java's `Runtime.getRuntime().maxMemory()` code.
     #[arg(long = "MAX_MEMORY", value_name = "usize", default_value_t=usize::MAX)]
     pub(crate) MAX_MEMORY: usize,
+
+    /// Max memory to use.
+    /// This option is not in Java MarkDuplicates but is here to handle java's `Runtime.getRuntime().maxMemory()` code.
+    #[arg(long = "READ_NAME_REGEX", value_name = "String", default_value_t=OpticalDuplicateFinder::DEFAULT_READ_NAME_REGEX.to_string())]
+    pub(crate) READ_NAME_REGEX: String,
 }

@@ -40,6 +40,20 @@ impl OpticalDuplicateFinder {
     pub(crate) const DEFAULT_MAX_DUPLICATE_SET_SIZE: i64 = 300000;
     pub(crate) const DEFAULT_BIG_DUPLICATE_SET_SIZE: i32 = 1000;
 
+    /**
+     * The read name regular expression (regex) is used to extract three pieces of information from the read name: tile, x location,
+     * and y location.  Any read name regex should parse the read name to produce these and only these values.  An example regex is:
+     *  (?:.*:)?([0-9]+)[^:]*:([0-9]+)[^:]*:([0-9]+)[^:]*$
+     * which assumes that fields in the read name are delimited by ':' and the last three fields correspond to the tile, x and y locations,
+     * ignoring any trailing non-digit characters.
+     *
+     * The default regex is optimized for fast parsing (see {@link #getLastThreeFields(String, char, int[])}) by searching for the last
+     * three fields, ignoring any trailing non-digit characters, assuming the delimiter ':'.  This should consider correctly read names
+     * where we have 5 or 7 field with the last three fields being tile/x/y, as is the case for the majority of read names produced by
+     * Illumina technology.
+     */
+    pub(crate) const DEFAULT_READ_NAME_REGEX: &'static str = "<optimized capture of last three ':' separated fields as numeric values>";
+
     #[allow(non_upper_case_globals)]
     const log: &'static str = stringify!(OpticalDuplicateFinder);
 
