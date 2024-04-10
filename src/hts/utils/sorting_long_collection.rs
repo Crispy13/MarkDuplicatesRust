@@ -110,9 +110,16 @@ impl SortingLongCollection {
             self.spill_to_disk();
         }
 
-        let merging_iterator = MergingIterator::<_, i64>::new(&self.files);
+        let mut priority_queue = BTreeSet::new();
+        for f in self.files.iter() {
+            let it = PeekFileValueIterator::new(FileValueIterator::new(f.to_path_buf()));
+            if it.peeked().is_some() {
+                priority_queue.insert(it);
+            }
+        }
 
-        self.priority_queue = Some(merging_iterator);
+        self.ram_values.clear();
+
     }
 }
 
@@ -131,13 +138,18 @@ impl FileValueIterator {
 
         let n_remained = load_byte_file_as_obj::<usize>(&mut is).unwrap();
 
-        Self {
+        
+        let mut s = Self {
             file,
             is,
             current_record: 0,
             is_current_record: true,
             n_remained,
-        }
+        };
+
+        s.next().unwrap();
+
+        s
     }
 }
 
@@ -159,6 +171,52 @@ impl Iterator for FileValueIterator {
         Some(ret)
     }
 }
+
+struct PeekFileValueIterator {
+    iter: FileValueIterator,
+    peeked: Option<Option<i64>>,
+}
+
+impl PeekFileValueIterator {
+    fn new(iter: FileValueIterator) -> Self {
+        // assert!(iter.is_current_record);
+
+        let mut s = Self { iter, peeked:None };
+
+        s.peek().unwrap(); // assume `iter` has at least one item.
+
+        s
+    }
+
+    fn peek(&mut self) -> Option<i64> {
+        let iter = &mut self.iter;
+        self.peeked.get_or_insert_with(|| iter.next()).clone()
+    }
+
+    /// get peeked item.
+    ///
+    /// It's the first item of the file in this iterator.
+    pub(crate) fn peeked(&self) -> Option<i64> {
+        self.peeked.as_ref().unwrap().clone()
+    }
+}
+
+impl Iterator for PeekFileValueIterator {
+    type Item=i64;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        let r = match self.peeked.take() {
+            Some(v) => v,
+            None => self.iter.next(),
+        };
+
+        self.peek(); // assure that self always has Some() in peeked field.
+
+        r
+    }
+}
+
 
 impl Default for SortingLongCollection {
     fn default() -> Self {
