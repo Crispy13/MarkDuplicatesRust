@@ -8,7 +8,9 @@ use std::{
 
 use tempfile::{NamedTempFile, TempPath};
 
-use crate::hts::utils::save_as_byte_to_file;
+use crate::hts::utils::{
+    load_byte_file_as_obj, save_as_byte_to_file, sorting_collection::MergingIterator,
+};
 
 pub(crate) struct SortingLongCollection {
     max_values_in_ram: usize,
@@ -21,7 +23,7 @@ pub(crate) struct SortingLongCollection {
 
     done_adding: bool,
     cleaned_up: bool,
-    // priority_queue: Option<BTreeSet<PeekFileRecordIterator<BufReader<File>, i64>>>,
+    priority_queue: Option<MergingIterator<BufReader<File>, i64>>,
 }
 
 impl SortingLongCollection {
@@ -108,9 +110,9 @@ impl SortingLongCollection {
             self.spill_to_disk();
         }
 
-        // let mut priority_queue = BTreeSet::new();
+        let merging_iterator = MergingIterator::<_, i64>::new(&self.files);
 
-        todo!()
+        self.priority_queue = Some(merging_iterator);
     }
 }
 
@@ -119,21 +121,42 @@ struct FileValueIterator {
     is: BufReader<File>,
     current_record: i64,
     is_current_record: bool,
+
+    n_remained: usize,
 }
 
 impl FileValueIterator {
-    fn new(
-        file: PathBuf,
-        is: BufReader<File>,
-        current_record: i64,
-        is_current_record: bool,
-    ) -> Self {
+    fn new(file: PathBuf) -> Self {
+        let mut is = BufReader::new(File::open(&file).unwrap());
+
+        let n_remained = load_byte_file_as_obj::<usize>(&mut is).unwrap();
+
         Self {
             file,
             is,
-            current_record,
-            is_current_record,
+            current_record: 0,
+            is_current_record: true,
+            n_remained,
         }
+    }
+}
+
+impl Iterator for FileValueIterator {
+    type Item = i64;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.n_remained < 1 {
+            self.current_record = 0;
+            self.is_current_record = false;
+
+            return None;
+        }
+
+        let ret = self.current_record;
+
+        self.current_record = load_byte_file_as_obj(&mut self.is).unwrap();
+
+        Some(ret)
     }
 }
 
