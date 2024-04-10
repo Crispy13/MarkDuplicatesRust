@@ -5,9 +5,9 @@ use serde::{Deserialize, Serialize};
  */
 #[derive(PartialEq, PartialOrd, Eq, Ord, Serialize, Deserialize)]
 pub(crate) struct RepresentativeReadIndexer {
-    read_index_in_file: i32,
-    set_size: i32,
-    representative_read_index_in_file: i32,
+    pub(crate) read_index_in_file: i32,
+    pub(crate) set_size: i32,
+    pub(crate) representative_read_index_in_file: i32,
 }
 
 impl Default for RepresentativeReadIndexer {

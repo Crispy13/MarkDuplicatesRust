@@ -255,6 +255,12 @@ where
         // self.ram_records.drain(..self.num_records_in_ram)
         self.ram_records.get(..self.num_records_in_ram).unwrap().iter()
     }
+    
+    pub(crate) fn clean_up(&mut self) {
+        self.iteration_started = true;
+        self.cleaned_up = true;
+
+    }
 }
 
 pub(crate) enum SortingCollectionIter<'a, T>

@@ -70,10 +70,10 @@ pub(crate) struct MarkDuplicates {
     pub(super) frag_sort: SortingCollection<ReadEndsForMarkDuplicates>,
     pub(super) pair_sort: SortingCollection<ReadEndsForMarkDuplicates>,
 
-    duplicate_indexes: SortingLongCollection,
-    optical_duplicate_indexes: Option<SortingLongCollection>,
+    pub(super) duplicate_indexes: SortingLongCollection,
+    pub(super) optical_duplicate_indexes: Option<SortingLongCollection>,
 
-    representative_read_indices_for_duplicates: SortingCollection<RepresentativeReadIndexer>,
+    pub(super) representative_read_indices_for_duplicates: SortingCollection<RepresentativeReadIndexer>,
 
     num_duplicate_indices: usize,
 }
@@ -448,11 +448,78 @@ impl MarkDuplicates {
         }
     }
 
-    pub(crate) fn handle_chunk(&mut self, mut next_chunk: Vec<ReadEndsForMarkDuplicates>) {
+    pub(crate) fn handle_chunk(&mut self, next_chunk: &mut Vec<ReadEndsForMarkDuplicates>) {
         if next_chunk.len() > 1 {
             self.mark_duplicate_pairs(next_chunk.as_mut_slice());
+            if self.cli.TAG_DUPLICATE_SET_MEMBERS {
+                self.add_representative_read_index(&next_chunk);
+            }
+        } else if next_chunk.len() == 1{
+            Self::add_singleton_to_count(&mut self.library_id_generator);
         }
-        todo!()
+    }
+
+    fn add_singleton_to_count(library_id_generator: &mut LibraryIdGenerator) {
+        library_id_generator.get_duplicate_count_hist().increment1(1.0);
+        library_id_generator.get_non_optical_duplicate_count_hist().increment1(1.0);
+    }
+
+    /**
+     * Takes a list of ReadEndsForMarkDuplicates objects and identify the
+     * representative read based on
+     * quality score. For all members of the duplicate set, add the read1
+     * index-in-file of the representative
+     * read to the records of the first and second in a pair. This value becomes is
+     * used for
+     * the 'DI' tag.
+     */
+    fn add_representative_read_index(&mut self, read_ends_slice: &[ReadEndsForMarkDuplicates]) {
+        let mut max_score = 0_i16;
+        let mut best = None;
+
+        // All read ends should have orientation FF, FR, RF, or RR
+        for end in read_ends_slice.iter() {
+            if end.score > max_score || best.is_none() {
+                max_score = end.score;
+                best = Some(end);
+            }
+        }
+
+        let best = best.unwrap();
+
+        // for read name (for representative read name), add the last of the pair that
+        // was examined
+        for end in read_ends_slice {
+            self.add_representative_read_of_duplicate_set(
+                best.read1_index_in_file,
+                read_ends_slice.len(),
+                end.read1_index_in_file,
+            );
+
+            if end.read1_index_in_file != end.read2_index_in_file {
+                self.add_representative_read_of_duplicate_set(
+                    best.read1_index_in_file,
+                    read_ends_slice.len(),
+                    end.read2_index_in_file,
+                );
+            }
+        }
+    }
+
+    fn add_representative_read_of_duplicate_set(
+        &mut self,
+        representative_read_index_in_file: i64,
+        set_size: usize,
+        read1_index_in_file: i64,
+    ) {
+        let mut rri = RepresentativeReadIndexer::default();
+        rri.representative_read_index_in_file = representative_read_index_in_file as i32;
+        rri.set_size = set_size as i32;
+        rri.read_index_in_file = read1_index_in_file as i32;
+
+        self.representative_read_indices_for_duplicates
+            .add(rri)
+            .unwrap();
     }
 
     /**
@@ -461,7 +528,7 @@ impl MarkDuplicates {
      * not be marked as duplicates. This assumes that the list contains objects
      * representing pairs.
      */
-    fn mark_duplicate_pairs(&mut self, mut read_ends_slice: &mut [ReadEndsForMarkDuplicates]) {
+    fn mark_duplicate_pairs(&mut self, read_ends_slice: &mut [ReadEndsForMarkDuplicates]) {
         let mut max_score = 0_i16;
         let mut best = None;
 
@@ -670,6 +737,36 @@ impl MarkDuplicates {
 
         if opt_dup_cnt > 0 {
             optical_duplicates_count_hist.increment1((opt_dup_cnt + 1) as f64);
+        }
+    }
+
+    pub(super) fn mark_duplicate_fragments(
+        &mut self,
+        list: &[ReadEndsForMarkDuplicates],
+        contains_pairs: bool,
+    ) {
+        if contains_pairs {
+            for end in list {
+                if !end.is_paired() {
+                    self.add_index_as_duplicate(end.read1_index_in_file);
+                }
+            }
+        } else {
+            let mut max_score = 0_i16;
+            let mut best = None;
+            for end in list {
+                if end.score > max_score || best.is_none() {
+                    max_score = end.score;
+                    best = Some(end);
+                }
+            }
+
+            let best = best.unwrap();
+            for end in list {
+                if end != best {
+                    self.add_index_as_duplicate(end.read1_index_in_file);
+                }
+            }
         }
     }
 }

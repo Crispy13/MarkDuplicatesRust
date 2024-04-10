@@ -9,7 +9,7 @@ use crate::{
     hts::{
         duplicate_scoring_strategy::DuplicateScoringStrategy, utils::sorting_collection::CowForSC,
     },
-    markdup::markduplicates::MarkDuplicatesExt,
+    markdup::{markduplicates::MarkDuplicatesExt, utils::read_ends::ReadEndsExt},
     utils::hash_code,
 };
 
@@ -438,38 +438,117 @@ impl MarkDuplicatesHelper {
     ) {
         md.sort_indices_for_duplicates(index_optical_duplicates);
 
-        let mut next_chunk: Vec<CowForSC<ReadEndsForMarkDuplicates>> = Vec::with_capacity(200);
+        let mut next_chunk: Vec<ReadEndsForMarkDuplicates> = Vec::with_capacity(200);
 
         // First just do the pairs
         mlog::info!("Traversing read pair information and detecting duplicates.");
 
         let mut first_of_next_chunk;
 
-        let mut pair_sort_iter = md.pair_sort.iter().unwrap();
+        let dummy_ends = ReadEndsForMarkDuplicates::default(); // use this for satisfying borrow checker.
+        let mut are_comparable = false;
 
+        let mut pair_sort = std::mem::take(&mut md.pair_sort);
+        let mut pair_sort_iter = pair_sort.drain().unwrap();
+
+        mlog::info!("Traversing read pair information and detecting duplicates.");
         if let Some(v) = pair_sort_iter.next() {
             // first_of_next_chunk = v;
 
             next_chunk.push(v);
             first_of_next_chunk = next_chunk.last().unwrap();
 
-            // pair_sort_iter.for_each(|next| {
-            //     if MarkDuplicates::are_comparable_for_duplicates(
-            //         &first_of_next_chunk,
-            //         &next,
-            //         true,
-            //         use_barcodes,
-            //     ) {
-            //         next_chunk.push(next);
-            //     } else {
-            //         md.handle_chunk(next_chunk);
-            //         next_chunk.clear();
-            //         next_chunk.push(next);
-            //         first_of_next_chunk = next_chunk.last().unwrap();
-            //     }
-            // })
+            for next in pair_sort_iter {
+                are_comparable = MarkDuplicates::are_comparable_for_duplicates(
+                    &first_of_next_chunk,
+                    &next,
+                    true,
+                    use_barcodes,
+                );
+
+                first_of_next_chunk = &dummy_ends;
+
+                if are_comparable {
+                    next_chunk.push(next);
+                } else {
+                    md.handle_chunk(&mut next_chunk);
+                    next_chunk.clear();
+                    next_chunk.push(next);
+                    first_of_next_chunk = next_chunk.last().unwrap();
+                }
+            }
+
+            md.handle_chunk(&mut next_chunk);
+        } else {
+            drop(pair_sort_iter);
+        }
+
+        pair_sort.clean_up();
+        next_chunk.clear();
+
+        // Now deal with the fragments
+        mlog::info!("Traversing fragment information and detecting duplicates.");
+        let mut contains_pairs = false;
+        let mut contains_frags = false;
+
+        let mut frag_sort = std::mem::take(&mut md.frag_sort);
+        let mut frag_sort_iter = frag_sort.drain().unwrap();
+
+        if let Some(v) = frag_sort_iter.next() {
+            contains_pairs = v.is_paired();
+            contains_frags = !v.is_paired();
+
+            next_chunk.push(v);
+            first_of_next_chunk = next_chunk.last().unwrap();
+
+            for next in frag_sort_iter {
+                are_comparable = MarkDuplicates::are_comparable_for_duplicates(
+                    first_of_next_chunk,
+                    &next,
+                    false,
+                    use_barcodes,
+                );
+
+                first_of_next_chunk = &dummy_ends;
+
+                if are_comparable {
+                    contains_pairs = contains_pairs || next.is_paired();
+                    contains_frags = contains_frags || !next.is_paired();
+
+                    next_chunk.push(next);
+                } else {
+                    if next_chunk.len() > 1 && contains_frags {
+                        md.mark_duplicate_fragments(&next_chunk, contains_pairs);
+                    }
+                    contains_pairs = next.is_paired();
+                    contains_frags = !next.is_paired();
+
+                    next_chunk.clear();
+                    next_chunk.push(next);
+                    first_of_next_chunk = next_chunk.last().unwrap();
+                }
+            }
+
+            md.mark_duplicate_fragments(&next_chunk, contains_pairs);
+        } else {
+            drop(frag_sort_iter);
+        }
+
+        frag_sort.clean_up();
+
+        mlog::info!("Sorting list of duplicate records.");
+        md.duplicate_indexes.done_adding_start_iteration();
+
+        if let Some(odi) = md.optical_duplicate_indexes.as_mut() {
+            odi.done_adding_start_iteration();
+        }
+
+        if md.cli.TAG_DUPLICATE_SET_MEMBERS {
+            md.representative_read_indices_for_duplicates.done_adding().unwrap();
         }
     }
+
+    
 }
 
 struct FlowOrder {

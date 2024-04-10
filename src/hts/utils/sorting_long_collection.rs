@@ -1,4 +1,10 @@
-use std::{io::Write, path::PathBuf, sync::OnceLock};
+use std::{
+    collections::BTreeSet,
+    fs::File,
+    io::{BufReader, Write},
+    path::PathBuf,
+    sync::OnceLock,
+};
 
 use tempfile::{NamedTempFile, TempPath};
 
@@ -14,6 +20,8 @@ pub(crate) struct SortingLongCollection {
     files: Vec<TempPath>,
 
     done_adding: bool,
+    cleaned_up: bool,
+    // priority_queue: Option<BTreeSet<PeekFileRecordIterator<BufReader<File>, i64>>>,
 }
 
 impl SortingLongCollection {
@@ -80,6 +88,53 @@ impl SortingLongCollection {
         self.num_values_in_ram = 0;
         self.files.push(f.into_temp_path());
     }
+
+    pub(crate) fn done_adding_start_iteration(&mut self) {
+        if self.cleaned_up || self.done_adding {
+            panic!("Cannot call doneAddingStartIteration() after cleanup() was called.");
+        }
+
+        self.done_adding = true;
+
+        if self.files.is_empty() {
+            self.ram_values
+                .get_mut(..self.num_values_in_ram)
+                .unwrap()
+                .sort();
+            return;
+        }
+
+        if self.num_values_in_ram > 0 {
+            self.spill_to_disk();
+        }
+
+        // let mut priority_queue = BTreeSet::new();
+
+        todo!()
+    }
+}
+
+struct FileValueIterator {
+    file: PathBuf,
+    is: BufReader<File>,
+    current_record: i64,
+    is_current_record: bool,
+}
+
+impl FileValueIterator {
+    fn new(
+        file: PathBuf,
+        is: BufReader<File>,
+        current_record: i64,
+        is_current_record: bool,
+    ) -> Self {
+        Self {
+            file,
+            is,
+            current_record,
+            is_current_record,
+        }
+    }
 }
 
 impl Default for SortingLongCollection {
@@ -91,6 +146,8 @@ impl Default for SortingLongCollection {
             num_values_in_ram: 0,
             files: Vec::new(),
             done_adding: false,
+            cleaned_up: false,
+            priority_queue: None,
         }
     }
 }
