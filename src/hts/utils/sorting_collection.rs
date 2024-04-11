@@ -224,6 +224,7 @@ where
         Ok(())
     }
 
+    // Note that if items are loaded from files not memory, the files still will remain.
     pub(crate) fn drain(&mut self) -> Result<SortingCollectionDrain<T>, Error> {
         self.get_ready_for_iter()?;
 
@@ -522,7 +523,7 @@ where
 
         let ret = file_iterator.next().unwrap(); // only file_iters having a next item are contained in `self.queue`
 
-        if let Some(_) = file_iterator.peek() {
+        if file_iterator.peek().is_some() {
             self.queue.insert(file_iterator);
         }
 

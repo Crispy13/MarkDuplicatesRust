@@ -24,6 +24,8 @@ pub(crate) struct SortingLongCollection {
     done_adding: bool,
     cleaned_up: bool,
     priority_queue: Option<MergingIterator<BufReader<File>, i64>>,
+
+    iteration_index: usize,
 }
 
 impl SortingLongCollection {
@@ -91,35 +93,75 @@ impl SortingLongCollection {
         self.files.push(f.into_temp_path());
     }
 
-    pub(crate) fn done_adding_start_iteration(&mut self) {
+    pub(crate) fn done_adding(&mut self) {
         if self.cleaned_up || self.done_adding {
             panic!("Cannot call doneAddingStartIteration() after cleanup() was called.");
         }
 
         self.done_adding = true;
+    }
 
+    pub(crate) fn drain(&mut self) -> SortingLongCollectionDrain<'_> {
         if self.files.is_empty() {
             self.ram_values
                 .get_mut(..self.num_values_in_ram)
                 .unwrap()
                 .sort();
-            return;
-        }
+            let r = SortingLongCollectionDrain::InMemoryDrain(
+                self.ram_values.drain(..self.num_values_in_ram),
+            );
 
-        if self.num_values_in_ram > 0 {
-            self.spill_to_disk();
-        }
+            self.num_values_in_ram = 0;
 
+            r
+        } else {
+            if self.num_values_in_ram > 0 {
+                self.spill_to_disk();
+            }
+
+            self.ram_values.clear();
+
+            SortingLongCollectionDrain::MergingIterator(MergingIteratorLong::new(&self.files))
+        }
+    }
+}
+
+pub(crate) enum SortingLongCollectionDrain<'a> {
+    InMemoryDrain(std::vec::Drain<'a, i64>),
+    MergingIterator(MergingIteratorLong),
+}
+
+pub(crate) struct MergingIteratorLong {
+    priority_queue: BTreeSet<PeekFileValueIterator>,
+}
+
+impl MergingIteratorLong {
+    fn new(files: &[TempPath]) -> Self {
         let mut priority_queue = BTreeSet::new();
-        for f in self.files.iter() {
+        for f in files.iter() {
             let it = PeekFileValueIterator::new(FileValueIterator::new(f.to_path_buf()));
             if it.peeked().is_some() {
                 priority_queue.insert(it);
             }
         }
+        Self { priority_queue }
+    }
+}
 
-        self.ram_values.clear();
+impl Iterator for MergingIteratorLong {
+    type Item = i64;
 
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.priority_queue.pop_first() {
+            Some(mut peek_iter) => {
+                let r = peek_iter.next();
+                if peek_iter.peeked().is_some() {
+                    self.priority_queue.insert(peek_iter);
+                }
+                r
+            }
+            None => None,
+        }
     }
 }
 
@@ -138,7 +180,6 @@ impl FileValueIterator {
 
         let n_remained = load_byte_file_as_obj::<usize>(&mut is).unwrap();
 
-        
         let mut s = Self {
             file,
             is,
@@ -181,7 +222,7 @@ impl PeekFileValueIterator {
     fn new(iter: FileValueIterator) -> Self {
         // assert!(iter.is_current_record);
 
-        let mut s = Self { iter, peeked:None };
+        let mut s = Self { iter, peeked: None };
 
         s.peek().unwrap(); // assume `iter` has at least one item.
 
@@ -196,13 +237,13 @@ impl PeekFileValueIterator {
     /// get peeked item.
     ///
     /// It's the first item of the file in this iterator.
-    pub(crate) fn peeked(&self) -> Option<i64> {
-        self.peeked.as_ref().unwrap().clone()
+    pub(crate) fn peeked(&self) -> Option<&i64> {
+        self.peeked.as_ref().unwrap().as_ref()
     }
 }
 
 impl Iterator for PeekFileValueIterator {
-    type Item=i64;
+    type Item = i64;
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
@@ -217,6 +258,26 @@ impl Iterator for PeekFileValueIterator {
     }
 }
 
+impl PartialOrd for PeekFileValueIterator {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.peeked()
+            .unwrap()
+            .partial_cmp(other.peeked().as_ref().unwrap())
+    }
+}
+
+impl PartialEq for PeekFileValueIterator {
+    fn eq(&self, other: &Self) -> bool {
+        self.peeked().unwrap().eq(other.peeked().unwrap())
+    }
+}
+impl Eq for PeekFileValueIterator {}
+
+impl Ord for PeekFileValueIterator {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.partial_cmp(other).unwrap()
+    }
+}
 
 impl Default for SortingLongCollection {
     fn default() -> Self {
@@ -229,6 +290,13 @@ impl Default for SortingLongCollection {
             done_adding: false,
             cleaned_up: false,
             priority_queue: None,
+            iteration_index: 0,
         }
     }
+}
+
+#[cfg(test)]
+mod test {
+    #[test]
+    fn save_and_load() {}
 }

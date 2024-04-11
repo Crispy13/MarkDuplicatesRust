@@ -436,6 +436,22 @@ impl MarkDuplicatesHelper {
         use_barcodes: bool,
         index_optical_duplicates: bool,
     ) {
+        match self {
+            MarkDuplicatesHelper::MarkDuplicatesHelper => {
+                self.generate_duplicate_indexes_normal(md, use_barcodes, index_optical_duplicates)
+            }
+            MarkDuplicatesHelper::MarkDuplicatesForFlowHelper => {
+                self.generate_duplicate_indexes_for_flow(md, use_barcodes, index_optical_duplicates)
+            }
+        }
+    }
+
+    fn generate_duplicate_indexes_normal(
+        &self,
+        md: &mut MarkDuplicates,
+        use_barcodes: bool,
+        index_optical_duplicates: bool,
+    ) {
         md.sort_indices_for_duplicates(index_optical_duplicates);
 
         let mut next_chunk: Vec<ReadEndsForMarkDuplicates> = Vec::with_capacity(200);
@@ -537,18 +553,227 @@ impl MarkDuplicatesHelper {
         frag_sort.clean_up();
 
         mlog::info!("Sorting list of duplicate records.");
-        md.duplicate_indexes.done_adding_start_iteration();
+        md.duplicate_indexes.done_adding();
 
         if let Some(odi) = md.optical_duplicate_indexes.as_mut() {
-            odi.done_adding_start_iteration();
+            odi.done_adding();
         }
 
         if md.cli.TAG_DUPLICATE_SET_MEMBERS {
-            md.representative_read_indices_for_duplicates.done_adding().unwrap();
+            md.representative_read_indices_for_duplicates
+                .done_adding()
+                .unwrap();
         }
     }
 
-    
+    /**
+     * This method is identical in function to generateDuplicateIndexes except that it accomodates for
+     * the possible significance of the end side of the reads (w/ or w/o uncertainty). This is only
+     * applicable for flow mode invocation.
+     */
+    fn generate_duplicate_indexes_for_flow(
+        &self,
+        md: &mut MarkDuplicates,
+        use_barcodes: bool,
+        index_optical_duplicates: bool,
+    ) {
+        md.sort_indices_for_duplicates(index_optical_duplicates);
+
+        // this code does support pairs at this time
+        if md.frag_sort.iter().unwrap().next().is_some() {
+            panic!("Flow based code does not support paired reads");
+        }
+
+        md.pair_sort.clean_up();
+        md.pair_sort = Default::default(); // instead of null in java, assign a default value to drop the original.
+
+        //
+        //  Now deal with the fragments
+        //
+        //  The end processing semantics depends on the following factors:
+        //  1. Whether the end is marked as significant (as specified by USE_END_IN_UNPAIRED_READS)
+        //  2. Whether end certainty is specified (by UNPAIRED_END_UNCERTAINTY)
+        //
+        //  - If ends are insignificant, they are ignored
+        //  - If ends are significant and uncertainty is set to 0 - they must be equal for fragments to be considered same
+        //  - Otherwise, fragments are accumulated (into the same bucket) as long as they are with the
+        //  specified uncertainty from at least one existing fragment. Note that using this strategy the effective
+        //  range of end locations associated with fragments in a bucket may grow, but only in 'uncertainty' steps.
+        //
+        mlog::info!("Traversing fragment information and detecting duplicates.");
+
+        let mut first_of_next_chunk;
+        let dummy_ends = ReadEndsForMarkDuplicates::default();
+
+        let mut next_chunk_read1_coordinate2_min = i32::MAX;
+        let mut next_chunk_read1_coordinate2_max = i32::MIN;
+
+        let mut next_chunk = Vec::with_capacity(200);
+
+        let mut contain_pairs = false;
+        let mut contain_frags = false;
+
+        let mut frag_sort = std::mem::take(&mut md.frag_sort);
+        let mut frag_sort_iter = frag_sort.drain().unwrap();
+        let mut are_comparable = false;
+        if let Some(next) = frag_sort_iter.next() {
+            if next.read_ends.read2_coordinate != Self::END_INSIGNIFICANT_VALUE {
+                next_chunk_read1_coordinate2_min = next.read_ends.read2_coordinate;
+                next_chunk_read1_coordinate2_max = next.read_ends.read2_coordinate;
+            } else {
+                next_chunk_read1_coordinate2_min = i32::MAX;
+                next_chunk_read1_coordinate2_max = i32::MIN;
+            }
+
+            contain_pairs = next.is_paired();
+            contain_frags = !next.is_paired();
+
+            next_chunk.push(next);
+            first_of_next_chunk = VecIndexKeeper::new(0);
+
+            for next in frag_sort_iter {
+                are_comparable = Self::are_comparable_for_duplicates_with_end_significance(
+                    first_of_next_chunk.get(&next_chunk),
+                    &next,
+                    use_barcodes,
+                    next_chunk_read1_coordinate2_min,
+                    next_chunk_read1_coordinate2_max,
+                    md.cli.UNPAIRED_END_UNCERTAINTY,
+                );
+
+                // first_of_next_chunk = &dummy_ends;
+
+                if are_comparable {
+                    contain_pairs = contain_pairs || next.is_paired();
+                    contain_frags = contain_frags || !next.is_paired();
+
+                    if next.read_ends.read2_coordinate != Self::END_INSIGNIFICANT_VALUE {
+                        next_chunk_read1_coordinate2_min =
+                            next_chunk_read1_coordinate2_min.min(next.read_ends.read2_coordinate);
+                        next_chunk_read1_coordinate2_max =
+                            next_chunk_read1_coordinate2_max.min(next.read_ends.read2_coordinate);
+
+                        next_chunk.push(next);
+
+                        if first_of_next_chunk
+                            .get(&next_chunk)
+                            .read_ends
+                            .read2_coordinate
+                            == Self::END_INSIGNIFICANT_VALUE
+                        {
+                            first_of_next_chunk.set_idx(next_chunk.len());
+                        }
+                    } else {
+                        next_chunk.push(next);
+                    }
+                } else {
+                    if next_chunk.len() > 1 && contain_frags {
+                        md.mark_duplicate_fragments(&next_chunk, contain_pairs);
+                    }
+
+                    next_chunk.clear();
+
+                    if next.read_ends.read2_coordinate != Self::END_INSIGNIFICANT_VALUE {
+                        next_chunk_read1_coordinate2_min = next.read_ends.read2_coordinate;
+                        next_chunk_read1_coordinate2_max = next.read_ends.read2_coordinate;
+                    } else {
+                        next_chunk_read1_coordinate2_min = i32::MAX;
+                        next_chunk_read1_coordinate2_max = i32::MIN;
+                    }
+
+                    contain_pairs = next.is_paired();
+                    contain_frags = !next.is_paired();
+
+                    next_chunk.push(next);
+                    first_of_next_chunk.set_idx(0);
+                }
+            }
+
+            md.mark_duplicate_fragments(&next_chunk, contain_pairs);
+            frag_sort.clean_up();
+        } else {
+            drop(frag_sort_iter);
+        }
+
+        mlog::info!("Sorting list of duplicate records.");
+        md.duplicate_indexes.done_adding();
+        if let Some(odi) = md.optical_duplicate_indexes.as_mut() {
+            odi.done_adding();
+        }
+
+        if md.cli.TAG_DUPLICATE_SET_MEMBERS {
+            md.representative_read_indices_for_duplicates
+                .done_adding()
+                .unwrap();
+        }
+    }
+
+    /**
+     * This method is identical in function to areComparableForDuplicates except that it accomodates for
+     * the possible significance of the end side of the reads (w/ or wo/ uncertainty). This is only
+     * applicable for flow mode invocation.
+     */
+    fn are_comparable_for_duplicates_with_end_significance(
+        lhs: &ReadEndsForMarkDuplicates,
+        rhs: &ReadEndsForMarkDuplicates,
+        use_barcodes: bool,
+        lhs_read1_coordinate2_min: i32,
+        lhs_read1_coordinate2_max: i32,
+        #[allow(non_snake_case)] UNPAIRED_END_UNCERTAINTY: i32,
+    ) -> bool {
+        let mut are_comparable =
+            MarkDuplicates::are_comparable_for_duplicates(lhs, rhs, false, use_barcodes);
+
+        if are_comparable {
+            are_comparable = !Self::end_coor_significant(
+                lhs.read_ends.read2_coordinate,
+                rhs.read_ends.read2_coordinate,
+            ) || Self::end_coor_in_range_with_uncertainty(
+                lhs_read1_coordinate2_min,
+                lhs_read1_coordinate2_max,
+                rhs.read_ends.read2_coordinate,
+                UNPAIRED_END_UNCERTAINTY,
+            );
+        }
+
+        are_comparable
+    }
+
+    #[inline]
+    fn end_coor_significant(lhs_coor: i32, rhs_coor: i32) -> bool {
+        lhs_coor != Self::END_INSIGNIFICANT_VALUE && rhs_coor != Self::END_INSIGNIFICANT_VALUE
+    }
+
+    #[inline]
+    fn end_coor_in_range_with_uncertainty(
+        lhs_coor_min: i32,
+        lhs_coor_max: i32,
+        rhs_coor: i32,
+        uncertainty: i32,
+    ) -> bool {
+        rhs_coor >= (lhs_coor_min - uncertainty) && rhs_coor <= (lhs_coor_max + uncertainty)
+    }
+}
+
+struct VecIndexKeeper {
+    idx: usize,
+}
+
+impl VecIndexKeeper {
+    fn new(idx: usize) -> Self {
+        Self { idx }
+    }
+
+    /// NOTE: This method will **panic** if `target.get(self.idx)` is `None`.
+    #[inline]
+    fn get<'v, T>(&self, target: &'v Vec<T>) -> &'v T {
+        target.get(self.idx).unwrap()
+    }
+
+    #[inline]
+    fn set_idx(&mut self, idx: usize) {
+        self.idx = idx;
+    }
 }
 
 struct FlowOrder {
