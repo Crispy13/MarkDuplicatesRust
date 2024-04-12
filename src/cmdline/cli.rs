@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use clap::{ArgAction, Args, Parser, Subcommand};
 use log::LevelFilter;
 
-use crate::{hts::duplicate_scoring_strategy::ScoringStrategy, markdup::utils::optical_duplicate_finder::OpticalDuplicateFinder};
+use crate::{hts::{duplicate_scoring_strategy::ScoringStrategy, SortOrder}, markdup::{markduplicates::DuplicateTaggingPolicy, utils::optical_duplicate_finder::OpticalDuplicateFinder}};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -186,4 +186,41 @@ pub(crate) struct Cli {
     /// This option is not in Java MarkDuplicates but is here to handle java's `Runtime.getRuntime().maxMemory()` code.
     #[arg(long = "READ_NAME_REGEX", value_name = "String", default_value_t=OpticalDuplicateFinder::DEFAULT_READ_NAME_REGEX.to_string())]
     pub(crate) READ_NAME_REGEX: String,
+
+    /// If true remove 'optical' duplicates and other duplicates that appear to have arisen from the 
+    /// sequencing process instead of the library preparation process, even if REMOVE_DUPLICATES is false. 
+    /// If REMOVE_DUPLICATES is true, all duplicates are removed and this option is ignored.
+    #[arg(long = "REMOVE_SEQUENCING_DUPLICATES", value_name = "bool", default_value_t=false)]
+    pub(crate) REMOVE_SEQUENCING_DUPLICATES: bool,
+
+    /// If true remove 'optical' duplicates and other duplicates that appear to have arisen from the 
+    /// sequencing process instead of the library preparation process, even if REMOVE_DUPLICATES is false. 
+    /// If REMOVE_DUPLICATES is true, all duplicates are removed and this option is ignored.
+    #[arg(long = "TAGGING_POLICY", value_name = "DuplicateTaggingPolicy", value_enum, default_value_t=DuplicateTaggingPolicy::DontTag)]
+    pub(crate) TAGGING_POLICY: DuplicateTaggingPolicy,
+
+    /// If not null, assume that the input file has this order even if the header says otherwise.
+    #[arg(long = "ASSUME_SORTED", value_name = "SortOrder",default_value_t=false)]
+    pub(crate) ASSUME_SORTED: bool,
+
+    /// If true, assume that the input file is coordinate sorted even if the header says otherwise. 
+    /// Deprecated, used ASSUME_SORT_ORDER=coordinate instead.
+    #[arg(long = "ASSUME_SORT_ORDER", value_name = "SortOrder", )]
+    pub(crate) ASSUME_SORT_ORDER: Option<SortOrder>,
+
+    /// Comment(s) to include in the output file's header.
+    #[arg(long = "COMMENT", value_name = "Vec<String>", )]
+    pub(crate) COMMENT: Vec<String>,
+}
+
+impl Cli {
+    /// do some more works after parsing command line argument.
+    pub(crate) fn after_action(&mut self) {
+        if self.ASSUME_SORT_ORDER.is_some() || self.ASSUME_SORTED {
+            if self.ASSUME_SORT_ORDER.is_none() {
+                self.ASSUME_SORT_ORDER = Some(SortOrder::Coordinate);
+                self.ASSUME_SORTED = false; // to maintain the "mutex" regarding these two arguments.
+            }
+        }
+    }
 }

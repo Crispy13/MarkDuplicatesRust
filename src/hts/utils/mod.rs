@@ -1,4 +1,5 @@
 use anyhow::Error;
+use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 use std::{
     fs::File,
@@ -51,3 +52,4 @@ pub(crate) fn load_byte_file_as_obj<T: for<'de> Deserialize<'de>>(
 ) -> Result<T, Error> {
     Ok(bincode::deserialize_from::<_, T>(file)?)
 }
+

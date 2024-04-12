@@ -430,7 +430,7 @@ impl MarkDuplicatesHelper {
         }
     }
 
-    fn generate_duplicate_indexes(
+    pub(super) fn generate_duplicate_indexes(
         &self,
         md: &mut MarkDuplicates,
         use_barcodes: bool,

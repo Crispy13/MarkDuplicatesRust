@@ -1,14 +1,16 @@
 use std::{
     borrow::{Borrow, BorrowMut},
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     fmt::Write,
     mem::size_of,
 };
 
+use clap::ValueEnum;
 use rust_htslib::bam::{
     ext::BamRecordExtensions,
+    header::HeaderRecord,
     record::{Aux, RecordExt, SAMReadGroupRecord},
-    HeaderView, IndexedReader, Read, Record,
+    Header, HeaderView, IndexedReader, Read, Record,
 };
 
 use macro_sup::set_mlog;
@@ -73,7 +75,8 @@ pub(crate) struct MarkDuplicates {
     pub(super) duplicate_indexes: SortingLongCollection,
     pub(super) optical_duplicate_indexes: Option<SortingLongCollection>,
 
-    pub(super) representative_read_indices_for_duplicates: SortingCollection<RepresentativeReadIndexer>,
+    pub(super) representative_read_indices_for_duplicates:
+        SortingCollection<RepresentativeReadIndexer>,
 
     num_duplicate_indices: usize,
 }
@@ -386,8 +389,6 @@ impl MarkDuplicates {
      * input file and writing it out with duplication flags set correctly.
      */
     pub(crate) fn do_work(&mut self) {
-        init_global_logger(self.cli.LOGGING_LEVEL);
-
         let use_barcodes = !self.cli.BARCODE_TAG.is_empty()
             || !self.cli.READ_ONE_BARCODE_TAG.is_empty()
             || !self.cli.READ_TWO_BARCODE_TAG.is_empty();
@@ -401,8 +402,81 @@ impl MarkDuplicates {
         log::info!(target: Self::log, "Reading input file and constructing read end information.");
         self.build_sorted_read_end_vecs(use_barcodes).unwrap();
 
+        self.calc_helper.generate_duplicate_indexes(
+            self,
+            use_barcodes,
+            self.cli.REMOVE_SEQUENCING_DUPLICATES
+                || self.cli.TAGGING_POLICY != DuplicateTaggingPolicy::DontTag,
+        );
 
-        
+        mlog::info!(
+            "Marking {}  records as duplicates.",
+            self.num_duplicate_indices
+        );
+
+        if self.cli.READ_NAME_REGEX.is_empty() {
+            mlog::warn!("Skipped optical duplicate cluster discovery; library size estimation may be inaccurate!");
+        } else {
+            mlog::info!(
+                "Found {} optical duplicate clusters.",
+                self.library_id_generator
+                    .get_number_of_optical_duplicate_clusters()
+            )
+        }
+
+        let indexed_reader = self.open_inputs().unwrap();
+        let header = indexed_reader.header();
+        let sort_order =
+            SortOrder::from_str(header.header_map().get_sort_order().unwrap()).unwrap();
+
+        let mut output_header = Header::from_template(header);
+
+        mlog::info!("Reads are assumed to be ordered by: {}", sort_order);
+
+        // Setting the ASSUME_SORT_ORDER to equal queryname is understood to mean that
+        // the input is
+        // queryname **grouped**. So that's what we set the output order to be, so that
+        // the validation will pass
+        if let Some(true) = self
+            .cli
+            .ASSUME_SORT_ORDER
+            .as_ref()
+            .and_then(|v| Some(matches!(v, SortOrder::QueryName)))
+        {
+            let mut header_record = HeaderRecord::new(b"A");
+            header_record.push_tag(SortOrder::GO.as_bytes(), "query");
+            header_record.push_tag(SortOrder::SO.as_bytes(), "unknown");
+            output_header.push_record(&header_record);
+        }
+
+        if self.cli.ASSUME_SORT_ORDER.is_none()
+            && !matches!(sort_order, SortOrder::Coordinate)
+            && !matches!(sort_order, SortOrder::QueryName)
+            || self.cli.ASSUME_SORT_ORDER.is_some()
+                && matches!(
+                    self.cli.ASSUME_SORT_ORDER.as_ref().unwrap(),
+                    SortOrder::Coordinate
+                )
+                && matches!(
+                    self.cli.ASSUME_SORT_ORDER.as_ref().unwrap(),
+                    SortOrder::QueryName
+                )
+        {
+            panic!(
+                "This program requires input that are either coordinate or query sorted (according to the header, or at least ASSUME_SORT_ORDER and the content.) \
+                Found ASSUME_SORT_ORDER={:?} and header sortorder={}",
+                self.cli.ASSUME_SORT_ORDER, sort_order
+            );
+        }
+
+        self.cli.COMMENT.iter().for_each(|c| {
+            output_header.push_comment(c.as_bytes());
+        });
+
+        // Key: previous PG ID on a SAM Record (or null). Value: New PG ID to replace
+        // it.
+        let chained_pg_ids = 
+
         todo!()
     }
 
@@ -456,14 +530,18 @@ impl MarkDuplicates {
             if self.cli.TAG_DUPLICATE_SET_MEMBERS {
                 self.add_representative_read_index(&next_chunk);
             }
-        } else if next_chunk.len() == 1{
+        } else if next_chunk.len() == 1 {
             Self::add_singleton_to_count(&mut self.library_id_generator);
         }
     }
 
     fn add_singleton_to_count(library_id_generator: &mut LibraryIdGenerator) {
-        library_id_generator.get_duplicate_count_hist().increment1(1.0);
-        library_id_generator.get_non_optical_duplicate_count_hist().increment1(1.0);
+        library_id_generator
+            .get_duplicate_count_hist()
+            .increment1(1.0);
+        library_id_generator
+            .get_non_optical_duplicate_count_hist()
+            .increment1(1.0);
     }
 
     /**
@@ -771,6 +849,19 @@ impl MarkDuplicates {
             }
         }
     }
+
+    /**
+     * We have to re-chain the program groups based on this algorithm.  This returns the map from existing program group ID
+     * to new program group ID.
+     */
+    fn get_chained_pg_ids(&self, output_header: &Header) {
+        let chained_pg_ids = HashMap::new();
+        // Generate new PG record(s)
+        if let Some(pr_id) = self.cli.PROGRAM_RECORD_ID.as_ref() {
+            let pg_id_generator = 
+        }
+
+    }
 }
 
 pub(super) trait MarkDuplicatesExt {
@@ -810,6 +901,13 @@ pub(super) trait MarkDuplicatesExt {
 }
 
 impl MarkDuplicatesExt for MarkDuplicates {}
+
+#[derive(ValueEnum, Clone, PartialEq, Debug)]
+pub(crate) enum DuplicateTaggingPolicy {
+    DontTag,
+    OpticalOnly,
+    All,
+}
 
 #[cfg(test)]
 mod test {

@@ -1,7 +1,9 @@
 pub(crate) mod coordinate_sorted_pair_info_map;
 pub(crate) mod duplicate_scoring_strategy;
 pub(crate) mod utils;
+pub(crate) mod header;
 
+use clap::ValueEnum;
 use rust_htslib::bam::HeaderView;
 
 // type Error = Box<dyn std::error::Error + Send + Sync>;
@@ -19,7 +21,7 @@ impl SAMTag {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, ValueEnum)]
 pub(crate) enum SortOrder {
     Unknown,
     Unsorted,
@@ -28,12 +30,21 @@ pub(crate) enum SortOrder {
 }
 
 impl SortOrder {
+    pub(crate) const SO: &'static str = "SO";
+    pub(crate) const GO: &'static str = "GO";
+
+    const UNKNOWN: &'static str = "unknown";
+    const UNSORTED: &'static str = "unsorted";
+    const QUERYNAME: &'static str = "queryname";
+    const COORDINATE: &'static str = "coordinate";
+
+
     pub(crate) fn from_str(s: &str) -> Result<Self, Error> {
         let v = match s {
-            "unknown" => Self::Unknown,
-            "unsorted" => Self::Unsorted,
-            "queryname" => Self::QueryName,
-            "coordinate" => Self::Coordinate,
+            Self::UNKNOWN => Self::Unknown,
+            Self::UNSORTED => Self::Unsorted,
+            Self::QUERYNAME => Self::QueryName,
+            Self::COORDINATE => Self::Coordinate,
             _ => Err(anyhow!("Invalid value: {}", s))?,
         };
 
@@ -47,6 +58,17 @@ impl SortOrder {
         };
 
         Ok(v)
+    }
+}
+
+impl std::fmt::Display for SortOrder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SortOrder::Unknown => write!(f, "{}", Self::UNKNOWN),
+            SortOrder::Unsorted => write!(f, "{}", Self::UNSORTED),
+            SortOrder::QueryName => write!(f, "{}", Self::QUERYNAME),
+            SortOrder::Coordinate => write!(f, "{}", Self::COORDINATE),
+        }
     }
 }
 

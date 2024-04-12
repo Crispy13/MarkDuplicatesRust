@@ -84,6 +84,10 @@ impl LibraryIdGenerator {
     pub(crate) fn get_duplicate_count_hist(&mut self) -> &mut Histogram<f64H> {
         &mut self.duplicate_count_hist
     }
+
+    pub(crate) fn get_number_of_optical_duplicate_clusters(&self) -> i64 {
+        self.optical_duplicates_by_library_id.get_sum_of_values() as i64
+    }
 }
 
 #[cfg(example)]
