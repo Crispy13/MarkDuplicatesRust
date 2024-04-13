@@ -3,6 +3,7 @@ use std::{
     collections::{HashMap, HashSet},
     fmt::Write,
     mem::size_of,
+    path::Path,
 };
 
 use clap::ValueEnum;
@@ -22,6 +23,7 @@ use crate::{
     hts::{
         duplicate_scoring_strategy::{DuplicateScoringStrategy, ScoringStrategy},
         header::PgIdGenerator,
+        metrics::MetricsFile,
         utils::{
             histogram::Histogram,
             sorting_collection::{CowForSC, SortingCollection},
@@ -374,7 +376,10 @@ impl MarkDuplicates {
             "Running with multiple input bams is not supported yet."
         );
 
-        Ok(IndexedReader::from_path(self.cli.INPUT.first().unwrap())?)
+        let mut r = IndexedReader::from_path(self.cli.INPUT.first().unwrap())?;
+        r.set_threads(self.cli.THREADS)?;
+
+        Ok(r)
     }
 
     pub(super) fn get_read_duplicate_score(
@@ -485,12 +490,14 @@ impl MarkDuplicates {
         let chained_pg_ids =
             Self::get_chained_pg_ids(&mut self.cli, &self.pg_ids_seen, &mut output_header);
 
-        let mut write_output = || -> Result<(), Error> {
+        let mut write_output_closure = || -> Result<(), Error> {
             let mut out_writer = Writer::from_path(
                 &self.cli.OUTPUT,
                 &output_header,
                 rust_htslib::bam::Format::Bam,
             )?;
+
+            out_writer.set_threads(self.cli.THREADS)?;
 
             let mut optical_duplicate_indexes_drain = self
                 .optical_duplicate_indexes
@@ -713,11 +720,16 @@ impl MarkDuplicates {
             Ok(())
         };
 
-        write_output().unwrap();
+        write_output_closure().unwrap();
 
         mlog::info!("Closed outputs. Getting more Memory Stats.");
 
-        todo!("Need to add codes for writing metrics.");
+        // Write out the metrics
+        Self::finalize_and_write_metrics(
+            &self.library_id_generator,
+            Self::get_metrics_file(),
+            &self.cli.METRICS_FILE,
+        );
     }
 
     /**
@@ -1231,6 +1243,33 @@ impl MarkDuplicates {
         }
 
         next_duplicate_index
+    }
+
+    /**
+     * Writes the metrics given by the libraryIdGenerator to the outputFile.
+     *
+     * @param libraryIdGenerator A {@link LibraryIdGenerator} object that contains the map from library to {@link DuplicationMetrics} for
+     *                           that library
+     * @param metricsFile        An empty {@link MetricsFile} object that will be filled, with "finalized" metrics and written out.
+     *                           It needs to be generated from a non-static context so that various commandline information is
+     *                           added to the header when {@link CommandLineProgram#getMetricsFile()} is called.
+     * @param outputFile         The file to write the metrics to
+     */
+    fn finalize_and_write_metrics(
+        library_id_generator: &LibraryIdGenerator,
+        metrics_file: MetricsFile<DuplicationMetrics, i16>,
+        output_file: impl AsRef<Path>,
+    ) {
+        todo!()
+    }
+
+    /** Gets a MetricsFile with default headers already written into it. */
+    fn get_metrics_file<B, H>() -> MetricsFile<B, H> {
+        let file = MetricsFile::new();
+
+        todo!();
+
+        file
     }
 }
 

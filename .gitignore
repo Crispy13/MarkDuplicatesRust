@@ -5,3 +5,8 @@ test_a.bytes
 .vscode
 *.json
 CSPI.tmp/
+compare_bam.sh
+comparison.tsv
+run_test.sh
+test.log
+bench_res/

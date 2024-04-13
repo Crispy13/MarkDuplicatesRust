@@ -2,6 +2,7 @@ pub(crate) mod coordinate_sorted_pair_info_map;
 pub(crate) mod duplicate_scoring_strategy;
 pub(crate) mod utils;
 pub(crate) mod header;
+pub(crate) mod metrics;
 
 use clap::ValueEnum;
 use rust_htslib::bam::HeaderView;

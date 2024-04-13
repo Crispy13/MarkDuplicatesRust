@@ -249,7 +249,13 @@ pub(crate) struct Cli {
     #[arg(long = "ADD_PG_TAG_TO_READS", value_name = "bool", default_value_t=true, action=clap::ArgAction::Set)]
     pub(crate) ADD_PG_TAG_TO_READS: bool,
 
+    /// File to write duplication metrics to
+    #[arg(long = "METRICS_FILE", value_name = "PathBuf", )]
+    pub(crate) METRICS_FILE: PathBuf,
 
+    /// Maximum thread to use.
+    #[arg(long = "THREADS", value_name = "usize", default_value_t=1)]
+    pub(crate) THREADS: usize,
 
 }
 
