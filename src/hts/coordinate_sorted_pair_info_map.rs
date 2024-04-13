@@ -2,7 +2,7 @@ use std::{
     borrow::Borrow,
     collections::{HashMap, HashSet},
     fmt::Display,
-    fs::{create_dir, remove_dir, remove_file, File, OpenOptions},
+    fs::{create_dir, remove_dir, remove_dir_all, remove_file, File, OpenOptions},
     hash::Hash,
     io::{BufReader, BufWriter, Read, Write},
     mem::size_of,
@@ -47,6 +47,10 @@ where
         // element_codec: Codec<K, R>,
     ) -> Result<Self, Error> {
         let work_dir = PathBuf::from_str("CSPI.tmp")?;
+
+        if work_dir.is_dir() {
+            remove_dir_all(&work_dir)?;
+        }
 
         match create_dir(&work_dir) {
             Ok(_) => {}

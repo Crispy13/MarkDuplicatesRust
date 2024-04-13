@@ -8,10 +8,11 @@ use rust_htslib::bam::{
 use crate::{
     hts::{
         duplicate_scoring_strategy::DuplicateScoringStrategy, utils::sorting_collection::CowForSC,
-    },
-    markdup::{markduplicates::MarkDuplicatesExt, utils::read_ends::ReadEndsExt},
-    utils::hash_code,
+    }, markdup::{markduplicates::MarkDuplicatesExt, utils::read_ends::ReadEndsExt}, utils::hash_code
 };
+
+// #[cfg(test)]
+// use crate::tests::ToJsonFileForTest;
 
 use super::{
     markduplicates::MarkDuplicates,
@@ -438,16 +439,15 @@ impl MarkDuplicatesHelper {
     ) {
         match self {
             MarkDuplicatesHelper::MarkDuplicatesHelper => {
-                self.generate_duplicate_indexes_normal(md, use_barcodes, index_optical_duplicates)
+                Self::generate_duplicate_indexes_normal(md, use_barcodes, index_optical_duplicates)
             }
             MarkDuplicatesHelper::MarkDuplicatesForFlowHelper => {
-                self.generate_duplicate_indexes_for_flow(md, use_barcodes, index_optical_duplicates)
+                Self::generate_duplicate_indexes_for_flow(md, use_barcodes, index_optical_duplicates)
             }
         }
     }
 
-    fn generate_duplicate_indexes_normal(
-        &self,
+    pub(super) fn generate_duplicate_indexes_normal(
         md: &mut MarkDuplicates,
         use_barcodes: bool,
         index_optical_duplicates: bool,
@@ -457,32 +457,35 @@ impl MarkDuplicatesHelper {
         let mut next_chunk: Vec<ReadEndsForMarkDuplicates> = Vec::with_capacity(200);
 
         // First just do the pairs
-        mlog::info!("Traversing read pair information and detecting duplicates.");
 
-        let mut first_of_next_chunk;
+        let mut first_of_next_chunk= VecIndexKeeper::new(0);
 
         let dummy_ends = ReadEndsForMarkDuplicates::default(); // use this for satisfying borrow checker.
         let mut are_comparable = false;
 
+        // #[cfg(test)]
+        // md.pair_sort.drain().unwrap().take(2000).save_object_to_json(format!("{}.pair_sort.2000.rust.json", md.cli.INPUT.get(0).unwrap()));
+
+        // #[cfg(test)]
+        // md.frag_sort.drain().unwrap().take(2000).save_object_to_json(format!("{}.frag_sort.2000.rust.json", md.cli.INPUT.get(0).unwrap()));
+
         let mut pair_sort = std::mem::take(&mut md.pair_sort);
         let mut pair_sort_iter = pair_sort.drain().unwrap();
-
+        
         mlog::info!("Traversing read pair information and detecting duplicates.");
         if let Some(v) = pair_sort_iter.next() {
             // first_of_next_chunk = v;
 
             next_chunk.push(v);
-            first_of_next_chunk = next_chunk.last().unwrap();
 
             for next in pair_sort_iter {
                 are_comparable = MarkDuplicates::are_comparable_for_duplicates(
-                    &first_of_next_chunk,
+                    first_of_next_chunk.get(&next_chunk),
                     &next,
                     true,
                     use_barcodes,
                 );
 
-                first_of_next_chunk = &dummy_ends;
 
                 if are_comparable {
                     next_chunk.push(next);
@@ -490,7 +493,7 @@ impl MarkDuplicatesHelper {
                     md.handle_chunk(&mut next_chunk);
                     next_chunk.clear();
                     next_chunk.push(next);
-                    first_of_next_chunk = next_chunk.last().unwrap();
+                    first_of_next_chunk.set_idx(0);
                 }
             }
 
@@ -501,6 +504,9 @@ impl MarkDuplicatesHelper {
 
         pair_sort.clean_up();
         next_chunk.clear();
+        first_of_next_chunk.set_idx(0);
+
+        
 
         // Now deal with the fragments
         mlog::info!("Traversing fragment information and detecting duplicates.");
@@ -514,18 +520,15 @@ impl MarkDuplicatesHelper {
             contains_pairs = v.is_paired();
             contains_frags = !v.is_paired();
 
-            next_chunk.push(v);
-            first_of_next_chunk = next_chunk.last().unwrap();
+            next_chunk.push(v); 
 
             for next in frag_sort_iter {
                 are_comparable = MarkDuplicates::are_comparable_for_duplicates(
-                    first_of_next_chunk,
+                    first_of_next_chunk.get(&next_chunk),
                     &next,
                     false,
                     use_barcodes,
                 );
-
-                first_of_next_chunk = &dummy_ends;
 
                 if are_comparable {
                     contains_pairs = contains_pairs || next.is_paired();
@@ -541,7 +544,7 @@ impl MarkDuplicatesHelper {
 
                     next_chunk.clear();
                     next_chunk.push(next);
-                    first_of_next_chunk = next_chunk.last().unwrap();
+                    first_of_next_chunk.set_idx(0);
                 }
             }
 
@@ -551,6 +554,7 @@ impl MarkDuplicatesHelper {
         }
 
         frag_sort.clean_up();
+        md.frag_sort = frag_sort;
 
         mlog::info!("Sorting list of duplicate records.");
         md.duplicate_indexes.done_adding();
@@ -571,8 +575,7 @@ impl MarkDuplicatesHelper {
      * the possible significance of the end side of the reads (w/ or w/o uncertainty). This is only
      * applicable for flow mode invocation.
      */
-    fn generate_duplicate_indexes_for_flow(
-        &self,
+    pub(super) fn generate_duplicate_indexes_for_flow(
         md: &mut MarkDuplicates,
         use_barcodes: bool,
         index_optical_duplicates: bool,

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use rust_htslib::bam::{
     record::{RecordExt, SAMReadGroupRecord},
@@ -16,6 +16,8 @@ pub(crate) struct LibraryIdGenerator {
     pub(crate) duplicate_count_hist: Histogram<f64H>,
     pub(crate) non_optical_duplicate_count_hist: Histogram<f64H>,
     pub(crate) optical_duplicate_count_hist: Histogram<f64H>,
+
+    metrics_by_library: BTreeMap<String, DuplicationMetrics>,
 }
 
 impl LibraryIdGenerator {
@@ -32,6 +34,7 @@ impl LibraryIdGenerator {
                 "non_optical_sets",
             ),
             optical_duplicate_count_hist: Histogram::from_labels("set_size", "optical_sets"),
+            metrics_by_library: BTreeMap::new(),
         }
     }
 
@@ -87,6 +90,85 @@ impl LibraryIdGenerator {
 
     pub(crate) fn get_number_of_optical_duplicate_clusters(&self) -> i64 {
         self.optical_duplicates_by_library_id.get_sum_of_values() as i64
+    }
+
+    pub(crate) fn get_metrics_by_library(&self, library: &str) -> Option<&DuplicationMetrics> {
+        self.metrics_by_library.get(library)
+    }
+
+    pub(crate) fn get_mut_metrics_by_library(&mut self, library: &str) -> Option<&mut DuplicationMetrics> {
+        self.metrics_by_library.get_mut(library)
+    }
+    
+    pub(crate) fn add_metrics_by_library(&mut self, library: String, metrics: DuplicationMetrics) {
+        self.metrics_by_library.insert(library, metrics);
+    }
+}
+
+#[allow(non_snake_case)]
+#[derive(Default)]
+pub(crate) struct DuplicationMetrics {
+    UNMAPPED_READS: usize,
+    SECONDARY_OR_SUPPLEMENTARY_RDS: usize,
+    UNPAIRED_READS_EXAMINED: usize,
+    READ_PAIRS_EXAMINED: usize,
+
+    flow_based_metrics: Option<FlowBasedMetrics>,
+
+    pub(crate) library:String,
+
+    UNPAIRED_READ_DUPLICATES: usize,
+    READ_PAIR_DUPLICATES: usize,
+}
+
+#[allow(non_snake_case)]
+#[derive(Default)]
+struct FlowBasedMetrics {
+    UNPAIRED_WITH_TLEN: usize,
+}
+
+impl DuplicationMetrics {
+    pub(crate) fn create_metrics(flow_metrics: bool) -> Self {
+        // create based on the presence of flow order
+        if !flow_metrics {
+            Self::default()
+        } else {
+            Self {
+                flow_based_metrics: Some(FlowBasedMetrics::default()),
+                ..Default::default()
+            }
+        }
+    }
+
+    /**
+     * Adds a read to the metrics
+     */
+    pub(crate) fn add_read_to_library_metrics(&mut self, rec: &Record) {
+        // First bring the simple metrics up to date
+        if rec.is_unmapped() {
+            self.UNMAPPED_READS += 1;
+        } else if rec.is_secondary() || rec.is_supplementary() {
+            self.SECONDARY_OR_SUPPLEMENTARY_RDS += 1;
+        } else if !rec.is_paired() || rec.is_mate_unmapped() {
+            self.UNPAIRED_READS_EXAMINED += 1;
+        } else {
+            self.READ_PAIRS_EXAMINED += 1; // will need to be divided by 2 at the end
+        }
+    }
+    
+    /**
+     * Adds duplicated read to the metrics
+     */
+    pub(crate) fn add_duplicate_read_to_metrics(&mut self, rec: &Record) {
+        // only update duplicate counts for "decider" reads, not tag-a-long reads
+        if !rec.is_secondary_or_supplementary() && !rec.is_unmapped() {
+            // Update the duplication metrics
+            if !rec.is_paired() || rec.is_mate_unmapped() {
+                self.UNPAIRED_READ_DUPLICATES += 1;
+            } else {
+                self.READ_PAIRS_EXAMINED += 1; // will need to be divided by 2 at the end
+            }
+        }
     }
 }
 

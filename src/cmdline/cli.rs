@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use clap::{ArgAction, Args, Parser, Subcommand};
+use clap::{Arg, ArgAction, Args, Parser, Subcommand};
 use log::LevelFilter;
 
 use crate::{hts::{duplicate_scoring_strategy::ScoringStrategy, SortOrder}, markdup::{markduplicates::DuplicateTaggingPolicy, utils::optical_duplicate_finder::OpticalDuplicateFinder}};
@@ -9,6 +9,15 @@ use crate::{hts::{duplicate_scoring_strategy::ScoringStrategy, SortOrder}, markd
 #[command(author, version, about, long_about = None)]
 #[allow(non_snake_case)]
 pub(crate) struct Cli {
+    /// One or more input SAM, BAM or CRAM files to analyze. Must be coordinate sorted.
+    #[arg(long = "INPUT", value_name = "Vec<String>", value_delimiter=',', num_args = 1.. )]
+    pub(crate) INPUT: Vec<String>,
+
+    /// The output file to write marked records to
+    #[arg(long = "OUTPUT", value_name = "PathBuf", required=true, )]
+    pub(crate) OUTPUT: PathBuf,
+
+
     /// The program record ID for the @PG record(s) created by this program. Set to null to disable
     /// PG record creation.  This string may have a suffix appended to avoid collision with other
     /// program record IDs.
@@ -54,7 +63,7 @@ pub(crate) struct Cli {
     /// Both reads from a read pair considered top strand if the read 1 unclipped 5' coordinate is less than the read
     /// 2 unclipped 5' coordinate. All chimeric reads and read fragments are treated as having come from the top strand.
     /// With this option is it required that the BARCODE_TAG hold non-normalized UMIs. Default false.
-    #[arg(long = "DUPLEX_UMI", value_name = "bool", default_value_t = false)]
+    #[arg(long = "DUPLEX_UMI", value_name = "bool", default_value_t = false, action=clap::ArgAction::Set)]
     pub(crate) DUPLEX_UMI: bool,
 
     /// Read one barcode SAM tag (ex. BX for 10X Genomics)
@@ -73,12 +82,10 @@ pub(crate) struct Cli {
     )]
     pub(crate) READ_TWO_BARCODE_TAG: String,
 
-    /// One or more input SAM, BAM or CRAM files to analyze. Must be coordinate sorted.
-    #[arg(long = "INPUT", value_name = "Vec<String>", required=true, value_delimiter=',', num_args = 1.. )]
-    pub(crate) INPUT: Vec<String>,
+    
 
     /// enable parameters and behavior specific to flow based reads.
-    #[arg(long = "FLOW_MODE", value_name = "bool", default_value_t = false)]
+    #[arg(long = "FLOW_MODE", value_name = "bool", default_value_t = false, action=clap::ArgAction::Set)]
     pub(crate) FLOW_MODE: bool,
 
     /// Use position of the clipping as the end position, when considering duplicates (or use the unclipped end position)
@@ -86,7 +93,7 @@ pub(crate) struct Cli {
     #[arg(
         long = "USE_UNPAIRED_CLIPPED_END",
         value_name = "bool",
-        default_value_t = false
+        default_value_t = false, action=clap::ArgAction::Set
     )]
     pub(crate) USE_UNPAIRED_CLIPPED_END: bool,
 
@@ -105,7 +112,7 @@ pub(crate) struct Cli {
     #[arg(
         long = "FLOW_Q_IS_KNOWN_END",
         value_name = "bool",
-        default_value_t = false
+        default_value_t = false, action=clap::ArgAction::Set
     )]
     pub(crate) FLOW_Q_IS_KNOWN_END: bool,
 
@@ -114,7 +121,7 @@ pub(crate) struct Cli {
     #[arg(
         long = "FLOW_QUALITY_SUM_STRATEGY",
         value_name = "bool",
-        default_value_t = false
+        default_value_t = false, action=clap::ArgAction::Set
     )]
     pub(crate) FLOW_QUALITY_SUM_STRATEGY: bool,
 
@@ -143,7 +150,7 @@ pub(crate) struct Cli {
     #[arg(
         long = "USE_END_IN_UNPAIRED_READS",
         value_name = "bool",
-        default_value_t = false
+        default_value_t = false, action=clap::ArgAction::Set
     )]
     pub(crate) USE_END_IN_UNPAIRED_READS: bool,
 
@@ -174,6 +181,7 @@ pub(crate) struct Cli {
         long = "TAG_DUPLICATE_SET_MEMBERS",
         value_name = "bool",
         default_value_t = false
+        , action=clap::ArgAction::Set
     )]
     pub(crate) TAG_DUPLICATE_SET_MEMBERS: bool,
 
@@ -190,7 +198,7 @@ pub(crate) struct Cli {
     /// If true remove 'optical' duplicates and other duplicates that appear to have arisen from the 
     /// sequencing process instead of the library preparation process, even if REMOVE_DUPLICATES is false. 
     /// If REMOVE_DUPLICATES is true, all duplicates are removed and this option is ignored.
-    #[arg(long = "REMOVE_SEQUENCING_DUPLICATES", value_name = "bool", default_value_t=false)]
+    #[arg(long = "REMOVE_SEQUENCING_DUPLICATES", value_name = "bool", default_value_t=false, action=clap::ArgAction::Set)]
     pub(crate) REMOVE_SEQUENCING_DUPLICATES: bool,
 
     /// If true remove 'optical' duplicates and other duplicates that appear to have arisen from the 
@@ -200,7 +208,7 @@ pub(crate) struct Cli {
     pub(crate) TAGGING_POLICY: DuplicateTaggingPolicy,
 
     /// If not null, assume that the input file has this order even if the header says otherwise.
-    #[arg(long = "ASSUME_SORTED", value_name = "SortOrder",default_value_t=false)]
+    #[arg(long = "ASSUME_SORTED", value_name = "SortOrder",default_value_t=false, action=clap::ArgAction::Set)]
     pub(crate) ASSUME_SORTED: bool,
 
     /// If true, assume that the input file is coordinate sorted even if the header says otherwise. 
@@ -211,6 +219,38 @@ pub(crate) struct Cli {
     /// Comment(s) to include in the output file's header.
     #[arg(long = "COMMENT", value_name = "Vec<String>", )]
     pub(crate) COMMENT: Vec<String>,
+
+    /// Value of VN tag of PG record to be created. If not specified, the version will be detected automatically.
+    #[arg(long = "PROGRAM_GROUP_VERSION", value_name = "String", default_value_t=String::new())]
+    pub(crate) PROGRAM_GROUP_VERSION: String,
+
+    /// Value of CL tag of PG record to be created. If not supplied the command line will be detected automatically.
+    #[arg(long = "PROGRAM_GROUP_COMMAND_LINE", value_name = "String", default_value_t=String::new())]
+    pub(crate) PROGRAM_GROUP_COMMAND_LINE: String,
+
+    /// Value of PN tag of PG record to be created.
+    #[arg(long = "PROGRAM_GROUP_NAME", value_name = "String", default_value_t=String::new())]
+    pub(crate) PROGRAM_GROUP_NAME: String,
+
+    /// Clear DT tag from input SAM records. Should be set to false if input SAM doesn't have this tag.  Default true
+    #[arg(long = "CLEAR_DT", value_name = "bool", default_value_t = true, action=clap::ArgAction::Set)]
+    pub(crate) CLEAR_DT: bool,
+
+    /// SAM tag to uniquely identify the molecule from which a read was derived.  Use of this option requires that 
+    /// the BARCODE_TAG option be set to a non null value.  Default null.
+    #[arg(long = "MOLECULAR_IDENTIFIER_TAG", value_name = "String", default_value_t = String::new())]
+    pub(crate) MOLECULAR_IDENTIFIER_TAG: String,
+
+    /// If true do not write duplicates to the output file instead of writing them with appropriate flags set.
+    #[arg(long = "REMOVE_DUPLICATES", value_name = "bool", default_value_t=false, action=clap::ArgAction::Set)]
+    pub(crate) REMOVE_DUPLICATES: bool,
+
+    /// Add PG tag to each read in a SAM or BAM
+    #[arg(long = "ADD_PG_TAG_TO_READS", value_name = "bool", default_value_t=true, action=clap::ArgAction::Set)]
+    pub(crate) ADD_PG_TAG_TO_READS: bool,
+
+
+
 }
 
 impl Cli {
@@ -221,6 +261,10 @@ impl Cli {
                 self.ASSUME_SORT_ORDER = Some(SortOrder::Coordinate);
                 self.ASSUME_SORTED = false; // to maintain the "mutex" regarding these two arguments.
             }
+        }
+
+        if self.PROGRAM_GROUP_NAME.is_empty() {
+            self.PROGRAM_GROUP_NAME = "MarkDuplicates".to_string();
         }
     }
 }

@@ -10,7 +10,7 @@ use rust_htslib::bam::{
     ext::BamRecordExtensions,
     header::HeaderRecord,
     record::{Aux, RecordExt, SAMReadGroupRecord},
-    Header, HeaderView, IndexedReader, Read, Record,
+    Header, HeaderView, IndexedReader, Read, Record, Writer,
 };
 
 use macro_sup::set_mlog;
@@ -21,10 +21,11 @@ use crate::{
     cmdline::cli::Cli,
     hts::{
         duplicate_scoring_strategy::{DuplicateScoringStrategy, ScoringStrategy},
+        header::PgIdGenerator,
         utils::{
             histogram::Histogram,
             sorting_collection::{CowForSC, SortingCollection},
-            sorting_long_collection::SortingLongCollection,
+            sorting_long_collection::{SortingLongCollection, SortingLongCollectionDrain},
         },
         SAMTag, SortOrder,
     },
@@ -32,13 +33,14 @@ use crate::{
         estimate_library_complexity::EstimateLibraryComplexity,
         umi_utils::UmiUtil,
         utils::{
-            library_id_generator::LibraryIdGenerator,
+            library_id_generator::{DuplicationMetrics, LibraryIdGenerator},
             read_ends::{ReadEnds, ReadEndsExt},
             read_ends_md_map::{
                 DiskBasedReadEndsForMarkDuplicatesMap, MemoryBasedReadEndsForMarkDuplicatesMap,
                 ReadEndsForMarkDuplicatesMap,
             },
             read_name_parser::ReadNameParserExt,
+            representative_read_indexer,
         },
     },
     utils::{
@@ -82,6 +84,12 @@ pub(crate) struct MarkDuplicates {
 }
 
 impl MarkDuplicates {
+    const DUPLICATE_TYPE_TAG: &'static str = "DT";
+    const DUPLICATE_TYPE_LIBRARY: &'static str = "LB";
+    const DUPLICATE_TYPE_SEQUENCING: &'static str = "SQ";
+    const DUPLICATE_SET_INDEX_TAG: &'static str = "DI";
+    const DUPLICATE_SET_SIZE_TAG: &'static str = "DS";
+
     pub(crate) fn new(mut cli: Cli) -> Self {
         const size_in_bytes: usize = size_of::<ReadEndsForMarkDuplicates>();
         let max_in_memory = ((24 * 10_usize.pow(9)) as f64 * cli.SORTING_COLLECTION_SIZE_RATIO
@@ -402,8 +410,7 @@ impl MarkDuplicates {
         log::info!(target: Self::log, "Reading input file and constructing read end information.");
         self.build_sorted_read_end_vecs(use_barcodes).unwrap();
 
-        self.calc_helper.generate_duplicate_indexes(
-            self,
+        self.generate_duplicate_indexes(
             use_barcodes,
             self.cli.REMOVE_SEQUENCING_DUPLICATES
                 || self.cli.TAGGING_POLICY != DuplicateTaggingPolicy::DontTag,
@@ -424,7 +431,7 @@ impl MarkDuplicates {
             )
         }
 
-        let indexed_reader = self.open_inputs().unwrap();
+        let mut indexed_reader = self.open_inputs().unwrap();
         let header = indexed_reader.header();
         let sort_order =
             SortOrder::from_str(header.header_map().get_sort_order().unwrap()).unwrap();
@@ -475,9 +482,242 @@ impl MarkDuplicates {
 
         // Key: previous PG ID on a SAM Record (or null). Value: New PG ID to replace
         // it.
-        let chained_pg_ids = 
+        let chained_pg_ids =
+            Self::get_chained_pg_ids(&mut self.cli, &self.pg_ids_seen, &mut output_header);
 
-        todo!()
+        let mut write_output = || -> Result<(), Error> {
+            let mut out_writer = Writer::from_path(
+                &self.cli.OUTPUT,
+                &output_header,
+                rust_htslib::bam::Format::Bam,
+            )?;
+
+            let mut optical_duplicate_indexes_drain = self
+                .optical_duplicate_indexes
+                .as_mut()
+                .and_then(|v| Some(v.drain()));
+
+            let mut duplicate_indexed_drain = self.duplicate_indexes.drain();
+
+            // Now copy over the file while marking all the necessary indexes as duplicates
+            let mut record_in_file_index = 0_i64;
+            let mut next_optical_duplicate_index = if let Some(odi) =
+                optical_duplicate_indexes_drain
+                    .as_mut()
+                    .and_then(|it| it.next())
+            {
+                odi
+            } else {
+                Self::NO_SUCH_INDEX
+            };
+
+            let mut next_duplicate_index = duplicate_indexed_drain
+                .next()
+                .unwrap_or(Self::NO_SUCH_INDEX);
+
+            // initialize variables for optional representative read tagging
+            let mut representative_read_iterator = None;
+            let rri;
+            let mut representative_read_index_in_file = -1;
+            let mut duplicate_set_size = -1;
+            let mut next_read_in_duplicate_set_index = -1;
+
+            if self.cli.TAG_DUPLICATE_SET_MEMBERS {
+                representative_read_iterator =
+                    Some(self.representative_read_indices_for_duplicates.iter()?);
+                if let Some(rri_n) = representative_read_iterator.as_mut().unwrap().next() {
+                    rri = rri_n;
+                    next_read_in_duplicate_set_index = rri.read_index_in_file;
+                    representative_read_index_in_file = rri.representative_read_index_in_file;
+                    duplicate_set_size = rri.set_size;
+                }
+            }
+
+            let mut progress =
+                ProgressLogger::new(Self::log, 10_usize.pow(7), "Written", "records");
+            let mut duplicate_query_name = Vec::<u8>::new();
+            let mut representative_query_name = Vec::<u8>::new();
+
+            indexed_reader.fetch(".")?;
+
+            let mut rec = Record::new();
+            while let Some(rl) = indexed_reader.read(&mut rec) {
+                rl?;
+
+                let metrics = Self::add_read_to_library_metrics(
+                    &rec,
+                    indexed_reader.header(),
+                    &mut self.library_id_generator,
+                    self.cli.FLOW_MODE,
+                )?;
+
+                // Now try and figure out the next duplicate index (if going by coordinate. if
+                // going by query name, only do this
+                // if the query name has changed.
+                next_duplicate_index = Self::next_index_if_needed(
+                    &sort_order,
+                    record_in_file_index,
+                    next_duplicate_index,
+                    &duplicate_query_name,
+                    &rec,
+                    &mut duplicate_indexed_drain,
+                );
+
+                let is_duplicate = record_in_file_index == next_duplicate_index
+                    || (matches!(sort_order, SortOrder::QueryName)
+                        && record_in_file_index > next_duplicate_index
+                        && rec.qname().eq(&duplicate_query_name));
+
+                if is_duplicate {
+                    rec.set_duplicate_read_flag(true);
+
+                    metrics.add_duplicate_read_to_metrics(&rec)
+                } else {
+                    rec.set_duplicate_read_flag(false);
+                }
+
+                if let Some(odid) = optical_duplicate_indexes_drain.as_mut() {
+                    next_optical_duplicate_index = Self::next_index_if_needed(
+                        &sort_order,
+                        record_in_file_index,
+                        next_optical_duplicate_index,
+                        &duplicate_query_name,
+                        &rec,
+                        odid,
+                    )
+                }
+
+                let is_optical_duplicate = matches!(sort_order, SortOrder::QueryName)
+                    && record_in_file_index > next_optical_duplicate_index
+                    && rec.qname().eq(&duplicate_query_name)
+                    || record_in_file_index == next_optical_duplicate_index;
+
+                if self.cli.CLEAR_DT {
+                    rec.remove_aux(Self::DUPLICATE_TYPE_TAG.as_bytes())?;
+                }
+
+                if !matches!(self.cli.TAGGING_POLICY, DuplicateTaggingPolicy::DontTag)
+                    && rec.is_duplicate()
+                {
+                    if is_optical_duplicate {
+                        rec.push_aux(
+                            Self::DUPLICATE_TYPE_TAG.as_bytes(),
+                            Aux::String(DuplicateType::SEQUENCING.code()),
+                        )?;
+                    } else if matches!(self.cli.TAGGING_POLICY, DuplicateTaggingPolicy::All) {
+                        rec.push_aux(
+                            Self::DUPLICATE_TYPE_TAG.as_bytes(),
+                            Aux::String(DuplicateType::LIBRARY.code()),
+                        )?;
+                    }
+                }
+
+                // Tag any read pair that was in a duplicate set with the duplicate set size and
+                // a representative read name
+                if self.cli.TAG_DUPLICATE_SET_MEMBERS {
+                    let need_next_representative_index = record_in_file_index
+                        > next_read_in_duplicate_set_index as i64
+                        && (matches!(sort_order, SortOrder::Coordinate)
+                            || rec.qname().eq(&representative_query_name));
+
+                    if need_next_representative_index {
+                        if let Some(rri) = representative_read_iterator.as_mut().unwrap().next() {
+                            next_read_in_duplicate_set_index = rri.read_index_in_file;
+                            representative_read_index_in_file =
+                                rri.representative_read_index_in_file;
+                            duplicate_set_size = rri.set_size;
+                        }
+                    }
+
+                    /*
+                     * If this record's index is readInDuplicateSetIndex, then it is in a
+                     * duplicateset.
+                     * For queryname sorted data, we only have one representativeReadIndex entry per
+                     * read name, so we need
+                     * to also look for additional reads with the same name.
+                     */
+                    let is_duplicate_set = record_in_file_index
+                        == next_read_in_duplicate_set_index as i64
+                        || (matches!(sort_order, SortOrder::QueryName)
+                            && record_in_file_index > next_read_in_duplicate_set_index as i64
+                            && rec.qname().eq(&representative_query_name));
+                    if is_duplicate_set {
+                        if !rec.is_secondary_or_supplementary() && !rec.is_unmapped() {
+                            rec.push_aux(
+                                Self::DUPLICATE_SET_INDEX_TAG.as_bytes(),
+                                Aux::I32(representative_read_index_in_file),
+                            )?;
+                            rec.push_aux(
+                                Self::DUPLICATE_SET_SIZE_TAG.as_bytes(),
+                                Aux::I32(duplicate_set_size),
+                            )?;
+                            representative_query_name = rec.qname().to_vec();
+                        }
+                    }
+                }
+
+                // Set MOLECULAR_IDENTIFIER_TAG for SAMRecord rec
+                if !self.cli.BARCODE_TAG.is_empty() {
+                    UmiUtil::set_molecular_identifier(
+                        &mut rec,
+                        "",
+                        &self.cli.MOLECULAR_IDENTIFIER_TAG,
+                        self.cli.DUPLEX_UMI,
+                    );
+                }
+
+                // Note, duplicateQueryName must be incremented after we have marked both
+                // optical and sequencing duplicates for queryname sorted files.
+                if is_duplicate {
+                    duplicate_query_name = rec.qname().to_vec();
+                }
+
+                // Output the record if desired and bump the record index
+                record_in_file_index += 1;
+                if self.cli.REMOVE_DUPLICATES && rec.is_duplicate() {
+                    continue;
+                }
+
+                if self.cli.REMOVE_SEQUENCING_DUPLICATES && is_optical_duplicate {
+                    continue;
+                }
+
+                if self.cli.PROGRAM_RECORD_ID.is_some() && self.cli.ADD_PG_TAG_TO_READS {
+                    if let Ok(pg) = rec.get_str_aux(SAMTag::PG.name().as_bytes()) {
+                        rec.push_aux(
+                            SAMTag::PG.name().as_bytes(),
+                            Aux::String(chained_pg_ids.as_ref().unwrap().get(pg).unwrap()),
+                        )?;
+                    }
+                }
+
+                out_writer.write(&rec)?;
+                progress.record(&rec);
+            }
+
+            // remember to close the inputs
+            mlog::info!("Writing complete. Closing input iterator.");
+
+            mlog::info!("Duplicate Index cleanup.");
+
+            drop(duplicate_indexed_drain);
+            self.duplicate_indexes.clean_up();
+
+            if self.cli.TAG_DUPLICATE_SET_MEMBERS {
+                mlog::info!("Representative read Index cleanup.");
+                self.representative_read_indices_for_duplicates.clean_up();
+            }
+
+            mlog::info!("Getting Memory Stats.");
+
+            Ok(())
+        };
+
+        write_output().unwrap();
+
+        mlog::info!("Closed outputs. Getting more Memory Stats.");
+
+        todo!("Need to add codes for writing metrics.");
     }
 
     /**
@@ -525,6 +765,22 @@ impl MarkDuplicates {
     }
 
     pub(crate) fn handle_chunk(&mut self, next_chunk: &mut Vec<ReadEndsForMarkDuplicates>) {
+        // if next_chunk.len() >= 1 {
+        //     mlog::debug!(
+        //         "handle_chunk: next_chunk.len()={} first_index={}",
+        //         next_chunk.len(),
+        //         next_chunk.first().unwrap().read1_index_in_file
+        //     );
+        // }
+
+        // mlog::debug!(
+        //     "handle_chunk: iif_indices={:#?}",
+        //     next_chunk
+        //         .iter()
+        //         .map(|e| (e.read1_index_in_file, e.read2_index_in_file))
+        //         .collect::<Vec<_>>()
+        // );
+
         if next_chunk.len() > 1 {
             self.mark_duplicate_pairs(next_chunk.as_mut_slice());
             if self.cli.TAG_DUPLICATE_SET_MEMBERS {
@@ -637,31 +893,39 @@ impl MarkDuplicates {
 
         let best = best.unwrap();
         for end in read_ends_slice.iter() {
+            // if end.read1_index_in_file == 4 || end.read2_index_in_file == 4 {
+            //     println!("end={:#?}", end);
+            //     println!("best={:#?}", end);
+            //     panic!("early end.");
+            // }
+
             if end != &best {
+                // mlog::debug!("Marked as duplicate: {} at p1.", end.read1_index_in_file);
                 self.add_index_as_duplicate(end.read1_index_in_file);
-            }
 
-            // in query-sorted case, these will be the same.
-            // TODO: also in coordinate sorted, when one read is unmapped
-            if end.read2_index_in_file != end.read1_index_in_file {
-                self.add_index_as_duplicate(end.read2_index_in_file);
-            }
-
-            if let Some((true, odi)) = self
-                .optical_duplicate_indexes
-                .as_mut()
-                .and_then(|v| Some((end.read_ends.is_optical_duplicate, v)))
-            {
-                odi.add(end.read1_index_in_file);
-                // We expect end.read2IndexInFile==read1IndexInFile when we are in queryname
-                // sorted files, as the read-pairs
-                // will be sorted together and nextIndexIfNeeded() will only pull one index from
-                // opticalDuplicateIndexes.
-                // This means that in queryname sorted order we will only pull from the sorting
-                // collection once,
-                // where as we would pull twice for coordinate sorted files.
+                // in query-sorted case, these will be the same.
+                // TODO: also in coordinate sorted, when one read is unmapped
                 if end.read2_index_in_file != end.read1_index_in_file {
-                    odi.add(end.read2_index_in_file);
+                    // mlog::debug!("Marked as duplicate: {} at p2.", end.read2_index_in_file);
+                    self.add_index_as_duplicate(end.read2_index_in_file);
+                }
+
+                if let Some((true, odi)) = self
+                    .optical_duplicate_indexes
+                    .as_mut()
+                    .and_then(|v| Some((end.read_ends.is_optical_duplicate, v)))
+                {
+                    odi.add(end.read1_index_in_file);
+                    // We expect end.read2IndexInFile==read1IndexInFile when we are in queryname
+                    // sorted files, as the read-pairs
+                    // will be sorted together and nextIndexIfNeeded() will only pull one index from
+                    // opticalDuplicateIndexes.
+                    // This means that in queryname sorted order we will only pull from the sorting
+                    // collection once,
+                    // where as we would pull twice for coordinate sorted files.
+                    if end.read2_index_in_file != end.read1_index_in_file {
+                        odi.add(end.read2_index_in_file);
+                    }
                 }
             }
         }
@@ -825,6 +1089,12 @@ impl MarkDuplicates {
         list: &[ReadEndsForMarkDuplicates],
         contains_pairs: bool,
     ) {
+        // mlog::debug!(
+        //     "mark_duplicate_fragments: list.len()={} first_index={}",
+        //     list.len(),
+        //     list.first().unwrap().read1_index_in_file
+        // );
+
         if contains_pairs {
             for end in list {
                 if !end.is_paired() {
@@ -854,13 +1124,113 @@ impl MarkDuplicates {
      * We have to re-chain the program groups based on this algorithm.  This returns the map from existing program group ID
      * to new program group ID.
      */
-    fn get_chained_pg_ids(&self, output_header: &Header) {
-        let chained_pg_ids = HashMap::new();
+    fn get_chained_pg_ids<'p>(
+        cli: &mut Cli,
+        pg_ids_seen: &'p HashSet<String>,
+        output_header: &mut Header,
+    ) -> Option<HashMap<&'p str, String>> {
+        let mut chained_pg_ids = HashMap::new();
+        cli.PROGRAM_GROUP_NAME = "MarkDuplicates".to_string();
+
         // Generate new PG record(s)
-        if let Some(pr_id) = self.cli.PROGRAM_RECORD_ID.as_ref() {
-            let pg_id_generator = 
+        if let Some(pr_id) = cli.PROGRAM_RECORD_ID.as_ref() {
+            let mut pg_id_generator = PgIdGenerator::new(output_header);
+            if cli.PROGRAM_GROUP_VERSION.is_empty() {
+                cli.PROGRAM_GROUP_VERSION = env!("CARGO_PKG_VERSION").to_string();
+            }
+
+            if cli.PROGRAM_GROUP_COMMAND_LINE.is_empty() {
+                cli.PROGRAM_GROUP_COMMAND_LINE = "MarkDuplicatesRust".to_string();
+            }
+
+            for existing_id in pg_ids_seen.iter().map(String::as_str) {
+                let new_pg_id = pg_id_generator.get_non_colliding_id(pr_id.to_string());
+                chained_pg_ids.insert(existing_id, new_pg_id);
+
+                let mut program_record = HeaderRecord::new(b"Z");
+                program_record.push_tag(b"VN", &cli.PROGRAM_GROUP_VERSION);
+                program_record.push_tag(b"CL", &cli.PROGRAM_GROUP_COMMAND_LINE);
+                program_record.push_tag(b"PN", &cli.PROGRAM_GROUP_NAME);
+                program_record.push_tag(b"ID", existing_id);
+                output_header.push_record(&program_record);
+            }
+        } else {
+            return None;
         }
 
+        Some(chained_pg_ids)
+    }
+
+    fn generate_duplicate_indexes(&mut self, use_barcodes: bool, index_optical_duplicates: bool) {
+        match self.calc_helper {
+            MarkDuplicatesHelper::MarkDuplicatesHelper => {
+                MarkDuplicatesHelper::generate_duplicate_indexes_normal(
+                    self,
+                    use_barcodes,
+                    index_optical_duplicates,
+                )
+            }
+            MarkDuplicatesHelper::MarkDuplicatesForFlowHelper => {
+                MarkDuplicatesHelper::generate_duplicate_indexes_for_flow(
+                    self,
+                    use_barcodes,
+                    index_optical_duplicates,
+                )
+            }
+        }
+    }
+
+    fn add_read_to_library_metrics<'l>(
+        rec: &Record,
+        header: &HeaderView,
+        library_id_generator: &'l mut LibraryIdGenerator,
+        flow_metrics: bool,
+    ) -> Result<&'l mut DuplicationMetrics, Error> {
+        let library = LibraryIdGenerator::get_library_name(rec)?;
+
+        if library_id_generator
+            .get_mut_metrics_by_library(library)
+            .is_none()
+        {
+            let mut metrics = DuplicationMetrics::create_metrics(flow_metrics);
+            metrics.library = library.to_string();
+
+            library_id_generator.add_metrics_by_library(library.to_string(), metrics);
+        }
+
+        let metrics = library_id_generator
+            .get_mut_metrics_by_library(library)
+            .unwrap();
+
+        metrics.add_read_to_library_metrics(rec);
+
+        Ok(metrics)
+    }
+
+    fn next_index_if_needed(
+        sort_order: &SortOrder,
+        record_in_file_index: i64,
+        mut next_duplicate_index: i64,
+        last_query_name: &[u8],
+        rec: &Record,
+        duplicate_indexes_drain: &mut SortingLongCollectionDrain,
+    ) -> i64 {
+        // Manage the flagging of optical/sequencing duplicates
+        // Possibly figure out the next opticalDuplicate index (if going by coordinate,
+        // if going by query name, only do this
+        // if the query name has changed)
+        let need_next_duplicate_index = record_in_file_index > next_duplicate_index
+            && (matches!(sort_order, SortOrder::Coordinate) || !rec.qname().eq(last_query_name));
+
+        if need_next_duplicate_index {
+            next_duplicate_index = if let Some(di) = duplicate_indexes_drain.next() {
+                di
+            } else {
+                Self::NO_SUCH_INDEX
+            }
+        }
+
+        next_duplicate_index
     }
 }
 
@@ -909,15 +1279,87 @@ pub(crate) enum DuplicateTaggingPolicy {
     All,
 }
 
+pub(crate) enum DuplicateType {
+    LIBRARY,
+    SEQUENCING,
+}
+
+impl DuplicateType {
+    fn code(&self) -> &str {
+        match self {
+            DuplicateType::LIBRARY => MarkDuplicates::DUPLICATE_TYPE_LIBRARY,
+            DuplicateType::SEQUENCING => MarkDuplicates::DUPLICATE_TYPE_SEQUENCING,
+        }
+    }
+}
+
 #[cfg(test)]
 mod test {
     use std::{borrow::Cow, path::Path};
 
     use clap::Parser;
 
-    use crate::tests::{from_java_read_ends, JavaReadEndIterator, ToJsonFileForTest};
+    use crate::tests::{
+        from_java_read_ends, JavaReadEndIterator, JsonFileIterator, ToJsonFileForTest,
+    };
 
     use super::*;
+
+    #[test]
+    fn test_do_work() {
+        init_global_logger(log::LevelFilter::Debug);
+
+        let bam_path =
+            Path::new("tests/data/NA12878.mapped.ILLUMINA.bwa.CEU.low_coverage.20121211.bam");
+
+        let out_path =
+            Path::new("NA12878.mapped.ILLUMINA.bwa.CEU.low_coverage.20121211.markdup.bam");
+
+        let args = std::env::var("MDR_ARGS").unwrap();
+        let args_splited = args.trim_end().split(" ").collect::<Vec<_>>();
+
+        println!("{:?}", args_splited);
+        let mut cli = Cli::parse_from(args_splited.into_iter());
+        cli.after_action();
+
+        // println!("{:?}", std::env::args());
+
+        // println!("Start to test.");
+
+        // let cli = Cli::parse();
+
+        let mut md = MarkDuplicates::new(cli);
+
+        md.do_work();
+
+        // let duplicate_indexes_drain = md.duplicate_indexes.drain();
+
+        // duplicate_indexes_drain
+        //     .save_object_to_json(format!("{}.DI.rust.json", md.cli.INPUT.get(0).unwrap()));
+
+        // JsonFileIterator::<i64>::new(format!("{}.DI.java.json", md.cli.INPUT.get(0).unwrap()))
+        //     .zip(duplicate_indexes_drain)
+        //     .enumerate()
+        //     .for_each(|(i, (j, r))| {
+        //         assert_eq!(j, r, ">> i={}\njava={:#?}\n\nrust={:#?}", i, j, r);
+        //     });
+
+        // if let Some(odi) = md.optical_duplicate_indexes.as_mut() {
+        //     JsonFileIterator::<i64>::new(format!("{}.ODI.java.json", md.cli.INPUT.get(0).unwrap()))
+        //         .zip(odi.drain())
+        //         .enumerate()
+        //         .for_each(|(i, (j, r))| {
+        //             assert_eq!(j, r, ">> i={}\njava={:#?}\n\nrust={:#?}", i, j, r);
+        //         });
+        // }
+
+        // JsonFileIterator::<RepresentativeReadIndexer>::new(format!("{}.RRI.java.json", md.cli.INPUT.get(0).unwrap()))
+        //         .zip(md.representative_read_indices_for_duplicates.drain().unwrap())
+        //         .enumerate()
+        //         .for_each(|(i, (j, r))| {
+        //             assert_eq!(j, r, ">> i={}\njava={:#?}\n\nrust={:#?}", i, j, r);
+        //         });
+    }
 
     #[test]
     fn test_build_read_ends() {
@@ -984,5 +1426,90 @@ mod test {
         //     });
         // assert_eq!(ps, from_java_read_ends_to_rust_read_ends("tests/data/NA12878.chrom11.20.bam.20.pairSort.read.ends"));
         // assert_eq!(fs, from_java_read_ends_to_rust_read_ends("tests/data/NA12878.chrom11.20.bam.20.fragSort.read.ends"));
+    }
+
+    #[test]
+    fn test_are_comparable() {
+        let a = r#"
+        {
+            "read1_qname": "SRR622461.127",
+            "score": 4482,
+            "read1_index_in_file": 2,
+            "read2_index_in_file": 728,
+            "duplicate_set_size": -1,
+            "read_ends": {
+                "library_id": 1,
+                "orientation": 3,
+                "read1_reference_index": 0,
+                "read1_coordinate": 10001,
+                "read2_reference_index": 0,
+                "read2_coordinate": 10388,
+                "read_group": -1,
+                "orientation_for_optical_duplicates": 3,
+                "pls": {
+                    "tile": -1,
+                    "x": -1,
+                    "y": -1
+                }
+            },
+            "barcode_data": null
+        }"#;
+        // let a = r#"{
+        //     "read1_qname": "SRR622461.133",
+        //     "score": 4593,
+        //     "read1_index_in_file": 3,
+        //     "read2_index_in_file": 734,
+        //     "duplicate_set_size": -1,
+        //     "read_ends": {
+        //         "library_id": 1,
+        //         "orientation": 3,
+        //         "read1_reference_index": 0,
+        //         "read1_coordinate": 10001,
+        //         "read2_reference_index": 0,
+        //         "read2_coordinate": 10388,
+        //         "read_group": -1,
+        //         "orientation_for_optical_duplicates": 5,
+        //         "pls": {
+        //             "tile": -1,
+        //             "x": -1,
+        //             "y": -1
+        //         }
+        //     },
+        //     "barcode_data": null
+        // }"#;
+
+        let a = serde_json::from_str::<ReadEndsForMarkDuplicates>(a).unwrap();
+
+        let b = r#"
+        {
+            "read1_qname": "SRR622461.145",
+            "score": 3327,
+            "read1_index_in_file": 4,
+            "read2_index_in_file": 744,
+            "duplicate_set_size": -1,
+            "read_ends": {
+                "library_id": 1,
+                "orientation": 3,
+                "read1_reference_index": 0,
+                "read1_coordinate": 10001,
+                "read2_reference_index": 0,
+                "read2_coordinate": 10388,
+                "read_group": -1,
+                "orientation_for_optical_duplicates": 3,
+                "pls": {
+                    "tile": -1,
+                    "x": -1,
+                    "y": -1
+                }
+            },
+            "barcode_data": null
+        }"#;
+
+        let b = serde_json::from_str::<ReadEndsForMarkDuplicates>(b).unwrap();
+
+        println!(
+            "{}",
+            MarkDuplicates::are_comparable_for_duplicates(&a, &b, true, false)
+        );
     }
 }

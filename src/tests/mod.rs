@@ -3,6 +3,7 @@ mod help_me;
 use std::{
     fs::File,
     io::{BufRead, BufReader, BufWriter, Read},
+    marker::PhantomData,
     path::Path,
 };
 
@@ -107,6 +108,92 @@ fn from_java_read_ends_to_rust_read_ends(path: impl AsRef<Path>) -> Vec<ReadEnds
     let jmds = serde_json::from_reader::<_, Vec<JavaMDReadEnds>>(buf_reader).unwrap();
 
     jmds.into_iter().map(from_java_read_ends).collect()
+}
+
+pub(crate) struct JsonFileIterator<T> {
+    buf_reader: BufReader<File>,
+    skipped: [u8; 1],
+    read_buf: Vec<u8>,
+    end: bool,
+    pht: PhantomData<T>,
+}
+
+impl<T> JsonFileIterator<T> {
+    pub(crate) fn new(file_path: impl AsRef<Path>) -> Self {
+        let mut buf_reader = BufReader::new(File::open(file_path.as_ref()).unwrap());
+
+        let mut skipped = [0_u8; 1];
+
+        if Self::read_one_byte(&mut buf_reader, &mut skipped) != b'[' {
+            panic!()
+        }
+
+        // let serde_iter = serde_json::from_reader::<_, JavaMDReadEnds>(file).into_iter();
+
+        Self {
+            buf_reader,
+            skipped,
+            end: false,
+            read_buf: Vec::with_capacity(128),
+            pht:PhantomData,
+        }
+    }
+
+    fn read_one_byte(file: &mut BufReader<File>, skipped: &mut [u8]) -> u8 {
+        file.read_exact(skipped).unwrap();
+
+        skipped[0]
+    }
+}
+
+impl<T> Iterator for JsonFileIterator<T>
+where
+    T: for<'de> Deserialize<'de>
+{
+    type Item = T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.end {
+            return None;
+        }
+
+        self.buf_reader
+            .read_until(b',', &mut self.read_buf)
+            .unwrap();
+
+        match self.read_buf.pop() {
+            Some(v) => {
+                if v == b']' {
+                    self.end = true;
+                    return None;
+                } else if v != b',' {
+                    self.read_buf.push(v);
+                }
+            },
+            None => {},
+        }
+        
+        let item = serde_json::from_slice::<T>(self.read_buf.as_slice()).unwrap();
+
+        self.read_buf.clear();
+
+        // self.buf_reader.seek_relative(-1).unwrap();
+
+        // if Self::read_one_byte(&mut self.buf_reader, &mut self.skipped) != b',' {
+        //     self.end = true;
+
+        //     self.buf_reader.read_to_end(&mut self.read_buf).unwrap();
+
+        //     if self.read_buf.contains(&b',') {
+        //         panic!(
+        //             "Parsing failed. remained_bytes={}",
+        //             std::str::from_utf8(&self.read_buf).unwrap()
+        //         )
+        //     }
+        // }
+
+        Some(item)
+    }
 }
 
 pub(crate) struct JavaReadEndIterator {

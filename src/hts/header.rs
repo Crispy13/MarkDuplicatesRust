@@ -8,7 +8,7 @@ pub(crate) struct PgIdGenerator {
 }
 
 impl PgIdGenerator {
-    fn new(header: &Header) -> Self {
+    pub(crate) fn new(header: &Header) -> Self {
         let mut ids_that_are_already_taken = HashSet::new();
         header
             .to_hashmap()
@@ -27,7 +27,7 @@ impl PgIdGenerator {
         }
     }
 
-    fn get_non_colliding_id(&mut self, record_id: String) -> String {
+    pub(crate) fn get_non_colliding_id(&mut self, record_id: String) -> String {
         if !self.ids_that_are_already_taken.contains(&record_id) {
             // don't remap 1st record. If there are more records
             // with this id, they will be remapped in the 'else'.

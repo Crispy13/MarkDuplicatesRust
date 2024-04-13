@@ -1,12 +1,21 @@
+use bio_types::genome::AbstractInterval;
 use std::sync::OnceLock;
 
 use anyhow::{anyhow, Error};
 use regex::Regex;
-use rust_htslib::bam::{record::RecordExt, Record};
+use rust_htslib::bam::{
+    ext::BamRecordExtensions,
+    record::{Aux, RecordExt},
+    Record,
+};
 pub(crate) struct UmiUtil {}
 
 impl UmiUtil {
     const DUPLEX_UMI_DELIMITER: &'static str = "-";
+    const CONTIG_SEPARATOR: &'static str = ":";
+    const UMI_NAME_SEPARATOR: &'static str = "/";
+    const TOP_STRAND_DUPLEX: &'static str = "/A";
+    const BOTTOM_STRAND_DUPLEX: &'static str = "/B";
 
     fn allowed_umi() -> &'static Regex {
         static rep: OnceLock<Regex> = OnceLock::new();
@@ -114,6 +123,60 @@ impl UmiUtil {
         } else {
             Ok(ReadStrand::BOTTOM)
         }
+    }
+
+    /**
+     * Set molecular identifier tag of record using UMI and alignment start position along with top and bottom strand information
+     * @param rec SAMRecord to set molecular index of
+     * @param assignedUmi Assigned or inferred UMI to use in the molecular index tag
+     * @param molecularIdentifierTag SAM tag to use as molecular identifier, if null no modification to the record will be made
+     * @param duplexUmis Treat UMI as duplex, if true /A and /B will be added to denote top and bottom strands respectively
+     */
+    pub(crate) fn set_molecular_identifier(
+        rec: &mut Record,
+        assigned_umi: &str,
+        molecular_identifier_tag: &str,
+        duplex_umis: bool,
+    ) {
+        if molecular_identifier_tag.is_empty() {
+            return;
+        }
+
+        let pos_from_strand = if rec.is_reverse() {
+            rec.reference_start()
+        } else {
+            rec.reference_end()
+        };
+
+        let mut molecular_identifier = format!(
+            "{}{}{}{}{}",
+            rec.contig(),
+            Self::CONTIG_SEPARATOR,
+            pos_from_strand,
+            Self::UMI_NAME_SEPARATOR,
+            assigned_umi
+        );
+
+        if duplex_umis {
+            // Reads whose strand position can be determined will have their
+            // molecularIdentifier set to include an identifier appended that
+            // indicates top or bottom strand.
+            let strand = Self::get_strand(rec).unwrap();
+            match strand {
+                ReadStrand::TOP => molecular_identifier.push_str(Self::TOP_STRAND_DUPLEX),
+                ReadStrand::BOTTOM => molecular_identifier.push_str(Self::BOTTOM_STRAND_DUPLEX),
+                ReadStrand::UNKNOWN => {
+                    // If we can't determine strand position nothing
+                    // is appended to the molecularIdentifier.
+                }
+            }
+        }
+
+        rec.push_aux(
+            molecular_identifier_tag.as_bytes(),
+            Aux::String(&molecular_identifier),
+        )
+        .unwrap();
     }
 }
 

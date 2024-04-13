@@ -124,11 +124,30 @@ impl SortingLongCollection {
             SortingLongCollectionDrain::MergingIterator(MergingIteratorLong::new(&self.files))
         }
     }
+    
+    pub(crate) fn clean_up(&mut self) {
+        self.done_adding = true;
+        self.cleaned_up = true;
+        self.ram_values.clear();
+
+
+    }
 }
 
 pub(crate) enum SortingLongCollectionDrain<'a> {
     InMemoryDrain(std::vec::Drain<'a, i64>),
     MergingIterator(MergingIteratorLong),
+}
+
+impl<'a> Iterator for SortingLongCollectionDrain<'a> {
+    type Item=i64;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            SortingLongCollectionDrain::InMemoryDrain(it) => it.next(),
+            SortingLongCollectionDrain::MergingIterator(it) => it.next(),
+        }
+    }
 }
 
 pub(crate) struct MergingIteratorLong {
