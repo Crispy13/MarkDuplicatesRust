@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, fmt::Display, hash::Hash, ops::Deref};
+use std::{borrow::Borrow, collections::BTreeMap, fmt::Display, hash::Hash, ops::Deref};
 
 /**
  * Class for computing and accessing histogram type data.  Stored internally in
@@ -189,6 +189,17 @@ where
         }
 
         self.get_sum_of_values() / self.size() as f64
+    }
+
+    /**
+     * Retrieves the bin associated with the given key.
+     */
+    pub(crate) fn get<K>(&self, key: &K) -> Option<&Bin<N>>
+    where
+        N: Borrow<K>,
+        K: Ord,
+    {
+        self.map.get(key)
     }
 }
 

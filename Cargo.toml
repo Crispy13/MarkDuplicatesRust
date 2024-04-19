@@ -23,6 +23,7 @@ tikv-jemalloc-ctl = "0.5.4"
 tikv-jemallocator = "0.5.4"
 macro_sup = { path = "./macro_sup" }
 serde_json = { version = "1.0.115", features = ["std"] }
+chrono = "0.4.38"
 
 [profile.dev]
 incremental = true

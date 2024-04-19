@@ -1,9 +1,8 @@
 use macro_sup::set_mlog;
 use rust_htslib::bam::{
-    ext::BamRecordExtensions,
-    record::{Aux, RecordExt},
-    HeaderView, Record,
+    ext::BamRecordExtensions, extra_ext::{HeaderViewExt, RecordExt}, record::Aux, HeaderView, Record
 };
+
 
 use crate::{
     hts::{

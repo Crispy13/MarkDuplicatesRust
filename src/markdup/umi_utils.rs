@@ -4,9 +4,7 @@ use std::sync::OnceLock;
 use anyhow::{anyhow, Error};
 use regex::Regex;
 use rust_htslib::bam::{
-    ext::BamRecordExtensions,
-    record::{Aux, RecordExt},
-    Record,
+    ext::BamRecordExtensions, extra_ext::RecordExt, record::Aux, Record
 };
 pub(crate) struct UmiUtil {}
 

@@ -1,9 +1,15 @@
-use std::path::PathBuf;
+use std::{fmt::Write, path::PathBuf};
 
 use clap::{Arg, ArgAction, Args, Parser, Subcommand};
 use log::LevelFilter;
 
-use crate::{hts::{duplicate_scoring_strategy::ScoringStrategy, SortOrder}, markdup::{markduplicates::DuplicateTaggingPolicy, utils::optical_duplicate_finder::OpticalDuplicateFinder}};
+use crate::{
+    hts::{duplicate_scoring_strategy::ScoringStrategy, SortOrder},
+    markdup::{
+        markduplicates::DuplicateTaggingPolicy,
+        utils::optical_duplicate_finder::OpticalDuplicateFinder,
+    },
+};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -14,9 +20,8 @@ pub(crate) struct Cli {
     pub(crate) INPUT: Vec<String>,
 
     /// The output file to write marked records to
-    #[arg(long = "OUTPUT", value_name = "PathBuf", required=true, )]
+    #[arg(long = "OUTPUT", value_name = "PathBuf", required = true)]
     pub(crate) OUTPUT: PathBuf,
-
 
     /// The program record ID for the @PG record(s) created by this program. Set to null to disable
     /// PG record creation.  This string may have a suffix appended to avoid collision with other
@@ -81,8 +86,6 @@ pub(crate) struct Cli {
         default_value_t = String::new(),
     )]
     pub(crate) READ_TWO_BARCODE_TAG: String,
-
-    
 
     /// enable parameters and behavior specific to flow based reads.
     #[arg(long = "FLOW_MODE", value_name = "bool", default_value_t = false, action=clap::ArgAction::Set)]
@@ -195,14 +198,14 @@ pub(crate) struct Cli {
     #[arg(long = "READ_NAME_REGEX", value_name = "String", default_value_t=OpticalDuplicateFinder::DEFAULT_READ_NAME_REGEX.to_string())]
     pub(crate) READ_NAME_REGEX: String,
 
-    /// If true remove 'optical' duplicates and other duplicates that appear to have arisen from the 
-    /// sequencing process instead of the library preparation process, even if REMOVE_DUPLICATES is false. 
+    /// If true remove 'optical' duplicates and other duplicates that appear to have arisen from the
+    /// sequencing process instead of the library preparation process, even if REMOVE_DUPLICATES is false.
     /// If REMOVE_DUPLICATES is true, all duplicates are removed and this option is ignored.
     #[arg(long = "REMOVE_SEQUENCING_DUPLICATES", value_name = "bool", default_value_t=false, action=clap::ArgAction::Set)]
     pub(crate) REMOVE_SEQUENCING_DUPLICATES: bool,
 
-    /// If true remove 'optical' duplicates and other duplicates that appear to have arisen from the 
-    /// sequencing process instead of the library preparation process, even if REMOVE_DUPLICATES is false. 
+    /// If true remove 'optical' duplicates and other duplicates that appear to have arisen from the
+    /// sequencing process instead of the library preparation process, even if REMOVE_DUPLICATES is false.
     /// If REMOVE_DUPLICATES is true, all duplicates are removed and this option is ignored.
     #[arg(long = "TAGGING_POLICY", value_name = "DuplicateTaggingPolicy", value_enum, default_value_t=DuplicateTaggingPolicy::DontTag)]
     pub(crate) TAGGING_POLICY: DuplicateTaggingPolicy,
@@ -211,13 +214,13 @@ pub(crate) struct Cli {
     #[arg(long = "ASSUME_SORTED", value_name = "SortOrder",default_value_t=false, action=clap::ArgAction::Set)]
     pub(crate) ASSUME_SORTED: bool,
 
-    /// If true, assume that the input file is coordinate sorted even if the header says otherwise. 
+    /// If true, assume that the input file is coordinate sorted even if the header says otherwise.
     /// Deprecated, used ASSUME_SORT_ORDER=coordinate instead.
-    #[arg(long = "ASSUME_SORT_ORDER", value_name = "SortOrder", )]
+    #[arg(long = "ASSUME_SORT_ORDER", value_name = "SortOrder")]
     pub(crate) ASSUME_SORT_ORDER: Option<SortOrder>,
 
     /// Comment(s) to include in the output file's header.
-    #[arg(long = "COMMENT", value_name = "Vec<String>", )]
+    #[arg(long = "COMMENT", value_name = "Vec<String>")]
     pub(crate) COMMENT: Vec<String>,
 
     /// Value of VN tag of PG record to be created. If not specified, the version will be detected automatically.
@@ -236,7 +239,7 @@ pub(crate) struct Cli {
     #[arg(long = "CLEAR_DT", value_name = "bool", default_value_t = true, action=clap::ArgAction::Set)]
     pub(crate) CLEAR_DT: bool,
 
-    /// SAM tag to uniquely identify the molecule from which a read was derived.  Use of this option requires that 
+    /// SAM tag to uniquely identify the molecule from which a read was derived.  Use of this option requires that
     /// the BARCODE_TAG option be set to a non null value.  Default null.
     #[arg(long = "MOLECULAR_IDENTIFIER_TAG", value_name = "String", default_value_t = String::new())]
     pub(crate) MOLECULAR_IDENTIFIER_TAG: String,
@@ -250,16 +253,26 @@ pub(crate) struct Cli {
     pub(crate) ADD_PG_TAG_TO_READS: bool,
 
     /// File to write duplication metrics to
-    #[arg(long = "METRICS_FILE", value_name = "PathBuf", )]
+    #[arg(long = "METRICS_FILE", value_name = "PathBuf")]
     pub(crate) METRICS_FILE: PathBuf,
 
     /// Maximum thread to use.
-    #[arg(long = "THREADS", value_name = "usize", default_value_t=1)]
+    #[arg(long = "THREADS", value_name = "usize", default_value_t = 1)]
     pub(crate) THREADS: usize,
 
+    #[arg(skip)]
+    pub(crate) commandline: String,
 }
 
 impl Cli {
+    pub(crate) fn parse_and_post() -> Cli {
+        let mut cli = <Self as Parser>::parse();
+
+        cli.after_action();
+
+        cli
+    }
+
     /// do some more works after parsing command line argument.
     pub(crate) fn after_action(&mut self) {
         if self.ASSUME_SORT_ORDER.is_some() || self.ASSUME_SORTED {
@@ -272,5 +285,14 @@ impl Cli {
         if self.PROGRAM_GROUP_NAME.is_empty() {
             self.PROGRAM_GROUP_NAME = "MarkDuplicates".to_string();
         }
+
+        // make command line string
+        self.commandline = std::env::args()
+            .into_iter()
+            .reduce(|s, x| {
+                write!(&mut s, " {}", x).unwrap();
+                s
+            })
+            .unwrap();
     }
 }

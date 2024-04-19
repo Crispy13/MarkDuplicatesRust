@@ -1,4 +1,4 @@
-use rust_htslib::bam::{record::RecordExt, Record};
+use rust_htslib::bam::{extra_ext::RecordExt, Record};
 
 use crate::utils::hash_code;
 

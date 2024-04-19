@@ -12,6 +12,7 @@ pub(crate) mod histogram;
 pub(crate) mod murmur3;
 pub(crate) mod sorting_collection;
 pub(crate) mod sorting_long_collection;
+pub(crate) mod format_util;
 
 pub(crate) fn save_as_byte_to_file<T: Serialize>(
     value: &T,

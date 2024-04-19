@@ -8,10 +8,7 @@ use std::{
 
 use clap::ValueEnum;
 use rust_htslib::bam::{
-    ext::BamRecordExtensions,
-    header::HeaderRecord,
-    record::{Aux, RecordExt, SAMReadGroupRecord},
-    Header, HeaderView, IndexedReader, Read, Record, Writer,
+    ext::BamRecordExtensions, extra_ext::RecordExt, header::HeaderRecord, record::Aux, Header, HeaderView, IndexedReader, Read, Record, Writer
 };
 
 use macro_sup::set_mlog;
@@ -23,9 +20,9 @@ use crate::{
     hts::{
         duplicate_scoring_strategy::{DuplicateScoringStrategy, ScoringStrategy},
         header::PgIdGenerator,
-        metrics::MetricsFile,
+        metrics::{self, MetricsFile, MetricsHeader},
         utils::{
-            histogram::Histogram,
+            histogram::{f64H, Histogram},
             sorting_collection::{CowForSC, SortingCollection},
             sorting_long_collection::{SortingLongCollection, SortingLongCollectionDrain},
         },
@@ -83,6 +80,8 @@ pub(crate) struct MarkDuplicates {
         SortingCollection<RepresentativeReadIndexer>,
 
     num_duplicate_indices: usize,
+
+    default_headers:Option<Vec<MetricsHeader>>,
 }
 
 impl MarkDuplicates {
@@ -726,8 +725,8 @@ impl MarkDuplicates {
 
         // Write out the metrics
         Self::finalize_and_write_metrics(
-            &self.library_id_generator,
-            Self::get_metrics_file(),
+            &mut self.library_id_generator,
+            self.get_metrics_file(),
             &self.cli.METRICS_FILE,
         );
     }
@@ -1010,7 +1009,7 @@ impl MarkDuplicates {
                 track_optical_duplicates_F.as_mut_slice(),
                 keeper,
                 optical_duplicate_finder,
-                library_id_generator.get_optical_duplicates_by_library_id_map(),
+                library_id_generator.get_mut_optical_duplicates_by_library_id_map(),
             );
 
             #[allow(non_snake_case)]
@@ -1018,7 +1017,7 @@ impl MarkDuplicates {
                 track_optical_duplicates_R.as_mut_slice(),
                 keeper,
                 optical_duplicate_finder,
-                library_id_generator.get_optical_duplicates_by_library_id_map(),
+                library_id_generator.get_mut_optical_duplicates_by_library_id_map(),
             );
 
             n_optical_dup = n_optical_dup_F + n_optical_dup_R;
@@ -1028,7 +1027,7 @@ impl MarkDuplicates {
                 ends,
                 keeper,
                 optical_duplicate_finder,
-                library_id_generator.get_optical_duplicates_by_library_id_map(),
+                library_id_generator.get_mut_optical_duplicates_by_library_id_map(),
             );
         }
 
@@ -1256,20 +1255,65 @@ impl MarkDuplicates {
      * @param outputFile         The file to write the metrics to
      */
     fn finalize_and_write_metrics(
-        library_id_generator: &LibraryIdGenerator,
-        metrics_file: MetricsFile<DuplicationMetrics, i16>,
+        library_id_generator: &mut LibraryIdGenerator,
+        mut metrics_file: MetricsFile<DuplicationMetrics, f64H>,
         output_file: impl AsRef<Path>,
     ) {
-        todo!()
+        let metrics_by_library = library_id_generator.get_mut_metrics_by_library_map();
+        let optical_duplicates_by_library_id = library_id_generator.get_optical_duplicates_by_library_id_map();
+        let library_ids = library_id_generator.get_library_ids_map();
+
+        // Write out the metrics
+        for (library_name, metrics) in metrics_by_library.into_iter() {
+            metrics.READ_PAIRS_EXAMINED = metrics.READ_PAIRS_EXAMINED / 2;
+            metrics.READ_PAIR_DUPLICATES = metrics.READ_PAIR_DUPLICATES / 2;
+
+            // Add the optical dupes to the metrics
+            if let Some(library_id) = library_ids.get(library_name) {
+                if let Some(bin) = optical_duplicates_by_library_id.get(library_id) {
+                    metrics.READ_PAIR_OPTICAL_DUPLICATES = bin.get_value() as usize;
+                }
+            }
+
+            metrics.calculate_derived_fields();
+            metrics_file.add_metric(metrics.clone());
+        }
+
+        if metrics_by_library.len() == 1 {
+            metrics_file.set_histogram(metrics_by_library.pop_first().unwrap().1.calculate_roi_histogram());
+        }
+
+        // Add set size histograms - the set size counts are printed on adjacent columns to the ROI metric.
+        metrics_file.add_histogram(library_id_generator.get_duplicate_count_hist().clone());
+        metrics_file.add_histogram(library_id_generator.get_optical_duplicate_count_hist().clone());
+        metrics_file.add_histogram(library_id_generator.get_non_optical_duplicate_count_hist().clone());
+
+        metrics_file.write(output_file.as_ref());
     }
 
     /** Gets a MetricsFile with default headers already written into it. */
-    fn get_metrics_file<B, H>() -> MetricsFile<B, H> {
+    fn get_metrics_file<B, H>(&self) -> MetricsFile<B, H> {
         let file = MetricsFile::new();
 
-        todo!();
+        for h in self.get_default_metrics_headers() {
+            file.add_header(h.clone());
+        }
 
         file
+    }
+
+    fn get_default_metrics_headers(&mut self) -> &Vec<MetricsHeader>  {
+        if self.default_headers.is_none() {
+            // set default header. code based on CommandLineProgram.java.
+
+            // Build the default headers
+            self.default_headers = Some(vec![
+                MetricsHeader::StringHeader(self.cli.commandline.clone()),
+                MetricsHeader::StringHeader(format!("Started on: {}", chrono::offset::Local::now().format("%Y%m%d %H:%M"))),
+            ]);
+        }
+
+        self.default_headers.as_ref().unwrap()
     }
 }
 
