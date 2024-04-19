@@ -7,5 +7,6 @@ pub(crate) struct FormatUtil {
 
 impl FormatUtil {
     pub(crate) const DECIMAL_DIGITS_TO_PRINT:i32 = 6;
+
     
 }

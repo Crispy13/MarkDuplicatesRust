@@ -52,10 +52,7 @@ use crate::{
 use super::{
     markduplicates_helper::MarkDuplicatesHelper,
     utils::{
-        optical_duplicate_finder::OpticalDuplicateFinder, physical_location::PhysicalLocation,
-        read_ends_for_mark_duplicates::ReadEndsForMarkDuplicates,
-        read_ends_for_mark_duplicates_with_barcodes::ReadEndsBarcodeData,
-        representative_read_indexer::RepresentativeReadIndexer,
+        library_id_generator::TypeName, optical_duplicate_finder::OpticalDuplicateFinder, physical_location::PhysicalLocation, read_ends_for_mark_duplicates::ReadEndsForMarkDuplicates, read_ends_for_mark_duplicates_with_barcodes::ReadEndsBarcodeData, representative_read_indexer::RepresentativeReadIndexer
     },
 };
 
@@ -1292,7 +1289,7 @@ impl MarkDuplicates {
     }
 
     /** Gets a MetricsFile with default headers already written into it. */
-    fn get_metrics_file<B, H>(&self) -> MetricsFile<B, H> {
+    fn get_metrics_file<B:TypeName, H>(&self) -> MetricsFile<B, H> {
         let file = MetricsFile::new();
 
         for h in self.get_default_metrics_headers() {
